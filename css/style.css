@@ -12,6 +12,53 @@ body {
   color: #010811;
 }
 
+/* Shared Background Image Container */
+.bg-image {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 100vw;
+  background-size: cover;
+  background-position: center;
+  z-index: -3;
+}
+
+/* User-specific Background Image */
+.user-page .bg-image {
+  background-image: url('/images/amalipa.jpg'); /* Customize this path */
+}
+
+/* Gray Transparent Overlay */
+.bg-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 100vw;
+  background-color: rgba(55, 65, 81, 0.5); /* gray-700 with 50% opacity */
+  z-index: -2;
+}
+
+/* Optional animated background gradient */
+.animated-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 100vw;
+  background: linear-gradient(-45deg, rgba(15, 23, 42, 0.5), rgba(30, 41, 59, 0.5), rgba(51, 65, 85, 0.5), rgba(71, 85, 105, 0.5));
+  background-size: 400% 400%;
+  animation: gradientFlow 12s ease infinite;
+  z-index: -1;
+}
+
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 /* Background image */
 .bg-image {
   position: fixed;
@@ -22,6 +69,17 @@ body {
   background-image: url('/images/ama.jpg');
   background-size: cover;
   background-position: center;
+  z-index: -3;
+}
+
+/* Gray transparent overlay */
+.bg-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 100vw;
+  background-color: rgba(55, 65, 81, 0.5); /* gray-700 with 50% opacity */
   z-index: -2;
 }
 
@@ -32,7 +90,7 @@ body {
   left: 0;
   height: 100vh;
   width: 100vw;
-  background: linear-gradient(-45deg, rgba(15, 23, 42, 0.6), rgba(30, 41, 59, 0.6), rgba(51, 65, 85, 0.6), rgba(71, 85, 105, 0.6));
+  background: linear-gradient(-45deg, rgba(15, 23, 42, 0.5), rgba(30, 41, 59, 0.5), rgba(51, 65, 85, 0.5), rgba(71, 85, 105, 0.5));
   background-size: 400% 400%;
   animation: gradientFlow 12s ease infinite;
   z-index: -1;
@@ -47,23 +105,24 @@ body {
 /* Login container */
 .login-container {
   background: rgba(255, 255, 255, 0.92);
-  padding: 35px 40px;
+  padding: 40px 45px;
   border-radius: 20px;
-  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(12px);
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(14px);
   max-width: 420px;
   width: 100%;
   z-index: 1;
   text-align: center;
-  transition: transform 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 .login-container:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
 }
 
 /* Header */
 .login-container h2 {
-  font-size: 30px;
+  font-size: 32px;
   font-weight: 700;
   color: #1e293b;
   margin-bottom: 6px;
@@ -74,10 +133,10 @@ body {
   margin-bottom: 25px;
 }
 
-/* Input fields with icons */
+/* Input wrapper */
 .input-wrapper {
   position: relative;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 .input-wrapper i {
   position: absolute;
@@ -90,18 +149,18 @@ body {
 input[type="text"],
 input[type="password"] {
   width: 100%;
-  padding: 11px 12px 11px 38px;
+  padding: 12px 14px 12px 40px;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   background: #ffffff;
-  transition: all 0.3s ease;
   font-size: 14px;
   color: #1e293b;
+  transition: all 0.3s ease;
 }
 input[type="text"]:focus,
 input[type="password"]:focus {
   border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
   outline: none;
 }
 
@@ -111,13 +170,13 @@ input[type="password"]:focus {
   text-align: right;
   font-size: 13px;
   color: maroon;
-  margin-top: -8px;
-  margin-bottom: 16px;
+  margin-top: -6px;
+  margin-bottom: 18px;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition: color 0.2s ease, text-decoration 0.2s ease;
 }
 .forgot-link:hover {
-  color: maroon;
+  color: #b91c1c; /* red-700 */
   text-decoration: underline;
 }
 
@@ -133,14 +192,14 @@ input[type="submit"] {
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 14px rgba(128, 0, 0, 0.4);
   transition: all 0.3s ease;
 }
 button[type="submit"]:hover,
 input[type="submit"]:hover {
   background: #0a3081;
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
+  box-shadow: 0 6px 18px rgba(10, 48, 129, 0.5);
 }
 
 /* Footer */
@@ -152,4 +211,55 @@ input[type="submit"]:hover {
 .login-container .footer span {
   color: rgb(199, 199, 6);
   font-weight: 600;
+}
+
+/* Responsive tweaks */
+@media (max-width: 480px) {
+  .login-container {
+    padding: 30px 25px;
+  }
+  .login-container h2 {
+    font-size: 26px;
+  }
+  input[type="text"],
+  input[type="password"] {
+    font-size: 13px;
+  }
+}
+
+.login-container::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px; /* Thickness of animated border */
+  border-radius: 20px;
+  background: linear-gradient(270deg, maroon, #2563eb, #facc15, maroon);
+  background-size: 600% 600%;
+  animation: loginGradientBorder 6s ease infinite;
+  z-index: -1;
+
+  /* Masking technique to create border-only effect */
+  mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: destination-out;
+  box-sizing: border-box;
+}
+@keyframes loginGradientBorder {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
