@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Student Dashboard - iLab</title>
+  <link rel="stylesheet" href="/css/studentdashboard.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2306/2306164.png">
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" alt="Student" />
+      <h1>Student Panel</h1>
+    </div>
+    <nav class="menu">
+      <a href="#" class="active" data-link="dashboard"><i class="fas fa-laptop-house"></i> Dashboard</a>
+      <a href="#" data-link="pcstatus"><i class="fas fa-desktop"></i> PC Status</a>
+      <a href="#" data-link="request"><i class="fas fa-paper-plane"></i> Request Assistance</a>
+      <a href="#" data-link="mylogs"><i class="fas fa-history"></i> My Logs</a>
+      <a href="#" data-link="settings"><i class="fas fa-user-cog"></i> Settings</a>
+      <a href="#" data-link="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+    <header class="main-header">
+      <h2>Welcome to iLab Student Dashboard</h2>
+      <p>Status as of <span id="date"></span></p>
+    </header>
+
+    <section id="dashboard" class="section active">
+      <div class="cards">
+        <div class="card session">
+          <i class="fas fa-clock"></i>
+          <div>
+            <h3>Active</h3>
+            <p>Session Status</p>
+          </div>
+        </div>
+        <div class="card pc">
+          <i class="fas fa-computer"></i>
+          <div>
+            <h3>PC #12</h3>
+            <p>Assigned Unit</p>
+          </div>
+        </div>
+        <div class="card time">
+          <i class="fas fa-hourglass-half"></i>
+          <div>
+            <h3>48 mins</h3>
+            <p>Session Time</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="activity">
+        <h3>Recent Activity</h3>
+        <ul>
+          <li><i class="fas fa-sign-in-alt text-green-600"></i> You logged in at 9:03 AM</li>
+          <li><i class="fas fa-desktop text-blue-600"></i> Using PC #12</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="pcstatus" class="section">
+      <h3>PC Status</h3>
+      <p>Show list of PCs and their availability here.</p>
+    </section>
+
+    <section id="request" class="section">
+      <h3>Request Assistance</h3>
+      <p>Submit a request for technical assistance.</p>
+    </section>
+
+    <section id="mylogs" class="section">
+      <h3>My Logs</h3>
+      <p>View your session and login history.</p>
+    </section>
+
+    <section id="settings" class="section">
+      <h3>Settings</h3>
+      <p>Update your profile or preferences.</p>
+    </section>
+
+    <section id="logout" class="section">
+      <h3>Logout</h3>
+      <p>You are now logged out.</p>
+    </section>
+  </main>
+
+  <script src="/js/studentdashboard.js"></script>
+</body>
+</html>

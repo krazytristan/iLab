@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IT Staff Dashboard - iLab</title>
+  <link rel="stylesheet" href="/css/itdashboard.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2306/2306164.png">
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <img src="https://cdn-icons-png.flaticon.com/512/1053/1053244.png" alt="IT Staff" />
+      <h1>IT Staff</h1>
+    </div>
+    <nav class="menu">
+      <a href="#" class="active" data-link="dashboard"><i class="fas fa-tools"></i> Dashboard</a>
+      <a href="#" data-link="tasks"><i class="fas fa-tasks"></i> Assigned Tasks</a>
+      <a href="#" data-link="inventory"><i class="fas fa-boxes"></i> Equipment</a>
+      <a href="#" data-link="issues"><i class="fas fa-exclamation-circle"></i> Reported Issues</a>
+      <a href="#" data-link="logs"><i class="fas fa-history"></i> Maintenance Logs</a>
+      <a href="#" data-link="settings"><i class="fas fa-cog"></i> Settings</a>
+      <a href="#" data-link="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+    <header class="main-header">
+      <h2>Welcome to IT Staff Dashboard</h2>
+      <p>System check as of <span id="date"></span></p>
+    </header>
+
+    <section id="dashboard" class="section active">
+      <div class="cards">
+        <div class="card tasks">
+          <i class="fas fa-clipboard-list"></i>
+          <div>
+            <h3>5</h3>
+            <p>Open Tasks</p>
+          </div>
+        </div>
+        <div class="card pending">
+          <i class="fas fa-wrench"></i>
+          <div>
+            <h3>2</h3>
+            <p>Ongoing Repairs</p>
+          </div>
+        </div>
+        <div class="card done">
+          <i class="fas fa-check-circle"></i>
+          <div>
+            <h3>18</h3>
+            <p>Completed</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="activity">
+        <h3>Latest Activity</h3>
+        <ul>
+          <li><i class="fas fa-tools text-blue-600"></i> Replaced keyboard on PC 14</li>
+          <li><i class="fas fa-check text-green-600"></i> Completed antivirus update on PC 6</li>
+          <li><i class="fas fa-exclamation text-red-500"></i> New issue reported for PC 20</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="tasks" class="section">
+      <h3>Assigned Tasks</h3>
+      <p>List of tasks assigned to IT staff.</p>
+    </section>
+
+    <section id="inventory" class="section">
+      <h3>Equipment Inventory</h3>
+      <p>Show current computer/lab equipment list.</p>
+    </section>
+
+    <section id="issues" class="section">
+      <h3>Reported Issues</h3>
+      <p>Display issues submitted by users.</p>
+    </section>
+
+    <section id="logs" class="section">
+      <h3>Maintenance Logs</h3>
+      <p>Show log of all past maintenance tasks.</p>
+    </section>
+
+    <section id="settings" class="section">
+      <h3>Settings</h3>
+      <p>Update profile or app settings.</p>
+    </section>
+
+    <section id="logout" class="section">
+      <h3>Logout</h3>
+      <p>You are now logged out.</p>
+    </section>
+  </main>
+
+  <script src="/js/itdashboard.js"></script>
+</body>
+</html>
