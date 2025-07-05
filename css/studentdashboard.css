@@ -42,16 +42,18 @@ body {
   z-index: 1000;
 }
 .sidebar .logo {
-  text-align: center;
-  margin: 20px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 140px;
 }
 .sidebar .logo img {
-  width: 60px;
+  width: 70px;
   border-radius: 50%;
 }
 .sidebar .logo h1 {
   font-size: 1.1rem;
-  margin-top: 10px;
+  margin-top: 50px;
 }
 .sidebar .menu a {
   display: flex;
