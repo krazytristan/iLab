@@ -11,6 +11,9 @@
 </head>
 <body>
 
+<div id="overlay" class="overlay"></div>
+
+<div id="container">
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo">
@@ -28,12 +31,16 @@
   </aside>
 
   <!-- Main Content -->
-  <main class="main">
+  <div class="main">
     <header class="main-header">
+      <button id="hamburger" class="hamburger-btn md:hidden">
+        <i class="fas fa-bars"></i>
+      </button>
       <h2>Welcome to iLab Student Dashboard</h2>
       <p>Status as of <span id="date"></span></p>
     </header>
 
+    <!-- Sections -->
     <section id="dashboard" class="section active">
       <div class="cards">
         <div class="card session">
@@ -92,8 +99,9 @@
       <h3>Logout</h3>
       <p>You are now logged out.</p>
     </section>
-  </main>
+  </div>
+</div>
 
-  <script src="/js/studentdashboard.js"></script>
+<script src="/js/studentdashboard.js"></script>
 </body>
 </html>
