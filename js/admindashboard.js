@@ -34,3 +34,34 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+document.addEventListener("DOMContentLoaded", () => {
+  const links = document.querySelectorAll(".menu a");
+  const sections = document.querySelectorAll(".section");
+
+  links.forEach(link => {
+    link.addEventListener("click", function(e) {
+      const target = this.getAttribute("data-link");
+
+      // Skip for actual logout
+      if (target === "logout") return;
+
+      e.preventDefault();
+
+      // Remove active class from all
+      links.forEach(l => l.classList.remove("active"));
+      sections.forEach(s => s.classList.remove("active"));
+
+      // Activate selected
+      this.classList.add("active");
+      document.getElementById(target).classList.add("active");
+    });
+  });
+
+  // Optional: Add spinner when logout is clicked
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      logoutBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging out...';
+    });
+  }
+});
