@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>iLab Student Registration</title>
-  <link rel="stylesheet" href="/css/register.css" />
+  <link rel="stylesheet" href="/ilab/css/register.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2306/2306164.png" />
   <style>
@@ -107,7 +107,7 @@
 
           <p class="text-sm text-center text-gray-500 mt-4">
             Already have an account?
-            <a href="user_login.html" class="text-blue-600 font-medium hover:underline">Login here</a>
+            <a href="student_login.php" class="text-blue-600 font-medium hover:underline">Login here</a>
           </p>
         </div>
       </form>

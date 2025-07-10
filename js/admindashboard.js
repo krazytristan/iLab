@@ -1,67 +1,50 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // ===== Display Current Date =====
   const dateEl = document.getElementById("date");
-  const today = new Date();
-  dateEl.textContent = today.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  if (dateEl) {
+    const today = new Date();
+    dateEl.textContent = today.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
 
-  const menuLinks = document.querySelectorAll(".menu a");
+  // ===== Sidebar Navigation Handling =====
+  const menuLinks = document.querySelectorAll(".menu a[data-link]");
   const sections = document.querySelectorAll(".section");
 
-  menuLinks.forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-
-      // Remove active class from all links
-      menuLinks.forEach((l) => l.classList.remove("active"));
-
-      // Add active class to clicked link
-      link.classList.add("active");
-
-      // Get target section ID
+  menuLinks.forEach(link => {
+    link.addEventListener("click", e => {
       const target = link.getAttribute("data-link");
 
-      // Show the target section and hide others
-      sections.forEach((sec) => {
-        sec.classList.remove("active");
-        if (sec.id === target) {
-          sec.classList.add("active");
-        }
-      });
-    });
-  });
-});
-document.addEventListener("DOMContentLoaded", () => {
-  const links = document.querySelectorAll(".menu a");
-  const sections = document.querySelectorAll(".section");
-
-  links.forEach(link => {
-    link.addEventListener("click", function(e) {
-      const target = this.getAttribute("data-link");
-
-      // Skip for actual logout
-      if (target === "logout") return;
+      if (!target || target === "logout") return;
 
       e.preventDefault();
 
-      // Remove active class from all
-      links.forEach(l => l.classList.remove("active"));
+      // Remove active class from all links and sections
+      menuLinks.forEach(l => l.classList.remove("active"));
       sections.forEach(s => s.classList.remove("active"));
 
-      // Activate selected
-      this.classList.add("active");
-      document.getElementById(target).classList.add("active");
+      // Activate selected link and section
+      link.classList.add("active");
+      const targetSection = document.getElementById(target);
+      if (targetSection) {
+        targetSection.classList.add("active");
+      }
     });
   });
 
-  // Optional: Add spinner when logout is clicked
+  // ===== Logout Button Spinner =====
   const logoutBtn = document.getElementById("logoutBtn");
   if (logoutBtn) {
-    logoutBtn.addEventListener("click", () => {
+    logoutBtn.addEventListener("click", (e) => {
+      e.preventDefault(); // Prevent immediate redirect
       logoutBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging out...';
+      setTimeout(() => {
+        window.location.href = "logout.php";
+      }, 800); // Slight delay for visual feedback
     });
   }
 });

@@ -14,7 +14,7 @@
 </head>
 <body class="h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-white to-gray-200 font-sans relative overflow-hidden">
 
-  <!-- Floating Error Toast -->
+  <!-- Error Toast -->
   <?php if (isset($_SESSION['login_error'])): ?>
     <div id="errorBox" class="fixed top-5 right-5 z-50 bg-red-100 border border-red-300 text-red-700 px-6 py-3 rounded-lg shadow-lg transition-opacity duration-500">
       <div class="flex items-center gap-2">
@@ -22,9 +22,16 @@
         <span><?= $_SESSION['login_error']; unset($_SESSION['login_error']); ?></span>
       </div>
     </div>
+  <?php elseif (isset($_SESSION['login_success'])): ?>
+    <div id="successBox" class="fixed top-5 right-5 z-50 bg-green-100 border border-green-300 text-green-700 px-6 py-3 rounded-lg shadow-lg transition-opacity duration-500">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-check-circle"></i>
+        <span><?= $_SESSION['login_success']; unset($_SESSION['login_success']); ?></span>
+      </div>
+    </div>
   <?php endif; ?>
 
-  <!-- Login Box -->
+  <!-- Login Form -->
   <div class="bg-white bg-opacity-90 shadow-2xl rounded-2xl p-8 w-full max-w-md backdrop-blur-md z-30">
     <div class="text-center mb-6">
       <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" alt="iLab Logo" class="mx-auto w-16 mb-2">
@@ -32,7 +39,6 @@
       <p class="text-sm text-gray-500">Login to manage your lab activity</p>
     </div>
 
-    <!-- Login Form -->
     <form id="loginForm" action="login.php" method="POST" class="space-y-4">
       <div>
         <label class="block text-gray-600 text-sm mb-1" for="username">Username</label>
@@ -53,7 +59,7 @@
       </div>
 
       <div class="text-right text-sm">
-        <a href="#" class="text-blue-600 hover:underline">Forgot password?</a>
+        <a href="forgot_password.php" class="text-blue-600 hover:underline">Forgot password?</a>
       </div>
 
       <button type="submit" id="loginBtn"
@@ -63,31 +69,33 @@
       </button>
     </form>
 
-    <p class="text-center text-sm text-gray-500 mt-6">
+    <p class="text-center text-sm text-gray-500 mt-4">
+      Don't have an account? <a href="admin_register.php" class="text-blue-600 hover:underline">Register here</a>
+    </p>
+
+    <p class="text-center text-sm text-gray-500 mt-4">
       Powered by <span class="font-semibold text-blue-700">AMACC Lipa</span>
     </p>
   </div>
 
-  <!-- Animated Background -->
   <div class="absolute top-0 left-0 w-full h-full bg-gradient-to-tr from-blue-200 to-transparent animate-pulse opacity-10 z-0 pointer-events-none"></div>
 
-  <!-- External Script -->
-  <script src="/js/admin.js"></script>
-
-  <!-- JS Enhancements -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // Auto-hide error box
       const errorBox = document.getElementById('errorBox');
-      if (errorBox) {
+      const successBox = document.getElementById('successBox');
+
+      if (errorBox || successBox) {
         setTimeout(() => {
-          errorBox.classList.add('opacity-0');
-          setTimeout(() => errorBox.remove(), 500);
+          errorBox?.classList.add('opacity-0');
+          successBox?.classList.add('opacity-0');
+          setTimeout(() => {
+            errorBox?.remove();
+            successBox?.remove();
+          }, 500);
         }, 3000);
       }
 
-
-      // Handle form submission
       const loginForm = document.getElementById('loginForm');
       const loginBtn = document.getElementById('loginBtn');
       const loginText = document.getElementById('loginText');

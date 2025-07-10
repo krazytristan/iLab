@@ -1,12 +1,13 @@
 /* ========== Base Layout ========== */
-body {
-  display: flex;
+html, body {
+  height: 100%;
   margin: 0;
-  height: 100vh;
-  overflow: hidden;
+  padding: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none;    /* Firefox */
+  background-color: #f9fafb;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 body::-webkit-scrollbar,
@@ -14,9 +15,20 @@ body::-webkit-scrollbar,
   display: none;
 }
 
+body {
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+body.dark {
+  background-color: #111827;
+  color: #f3f4f6;
+}
+
 /* ========== Sidebar ========== */
 .sidebar {
-  background: linear-gradient(to bottom, rgb(75, 1, 1), #4b1c1c);
+  background: linear-gradient(to bottom, #4b0101, #4b1c1c);
   color: white;
   width: 250px;
   padding: 20px;
@@ -25,6 +37,8 @@ body::-webkit-scrollbar,
   position: sticky;
   top: 0;
   height: 100vh;
+  z-index: 100;
+  transition: left 0.3s ease;
 }
 
 .sidebar .logo {
@@ -34,62 +48,133 @@ body::-webkit-scrollbar,
 
 .sidebar .logo img {
   width: 60px;
+  height: 60px;
+  object-fit: cover;
   border-radius: 50%;
 }
 
 .sidebar .logo h1 {
   font-size: 1.2rem;
   margin-top: 10px;
+  font-weight: bold;
 }
 
 .sidebar .menu a {
   display: flex;
   align-items: center;
-  padding: 12px;
+  padding: 12px 14px;
   color: white;
   text-decoration: none;
   border-radius: 8px;
   margin-bottom: 10px;
-  transition: background 0.2s, transform 0.2s;
+  transition: background 0.2s ease, transform 0.2s ease;
+  position: relative;
 }
 
 .sidebar .menu a i {
   margin-right: 10px;
+  font-size: 1rem;
 }
 
 .sidebar .menu a:hover,
 .sidebar .menu a.active {
   background: #374eb0;
   font-weight: bold;
-  transform: translateX(4px);
+  transform: translateX(6px);
 }
 
-/* ========== Main Area ========== */
+.sidebar .logout {
+  margin-top: auto;
+  color: #f87171;
+  transition: color 0.2s ease;
+}
+
+.sidebar .logout:hover {
+  color: #f43f5e;
+}
+
+body.dark .sidebar {
+  background: linear-gradient(to bottom, #111111, #1f1f1f);
+}
+
+body.dark .sidebar .menu a {
+  color: #d1d5db;
+}
+
+body.dark .sidebar .menu a:hover,
+body.dark .sidebar .menu a.active {
+  background: #4f46e5;
+  color: white;
+}
+
+/* Responsive Sidebar */
+.sidebar.mobile-hidden {
+  left: -260px;
+  position: fixed;
+}
+
+.sidebar.mobile-visible {
+  left: 0;
+}
+
+/* ========== Main Content ========== */
 .main {
   flex: 1;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
-  position: relative;
+  min-height: 100vh;
   background: #f9fafb;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+body.dark .main {
+  background: #1f2937;
+}
+
+@media (max-width: 768px) {
+  .main {
+    margin-left: 0 !important;
+  }
+}
+
+/* ========== Header ========== */
 .main-header {
   position: sticky;
   top: 0;
   background-color: #f3f4f6;
-  z-index: 100;
+  z-index: 40;
   padding: 20px 40px;
   border-bottom: 1px solid #d1d5db;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .main-header h2 {
   font-size: 2rem;
-  font-weight: bold;
+  font-weight: 600;
   color: #1f2937;
+  margin: 0;
 }
 
 .main-header p {
   color: #6b7280;
+  font-size: 0.9rem;
+}
+
+body.dark .main-header {
+  background-color: #111827;
+  color: #f3f4f6;
+  border-color: #374151;
+}
+
+body.dark .main-header h2 {
+  color: #e5e7eb;
+}
+
+body.dark .main-header p {
+  color: #9ca3af;
 }
 
 /* ========== Cards ========== */
@@ -109,14 +194,14 @@ body::-webkit-scrollbar,
   box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
   color: white;
   transition: transform 0.2s ease, box-shadow 0.3s ease;
+  cursor: pointer;
 }
 
 .card:hover {
   transform: translateY(-6px);
-  box-shadow: 0 12px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
-/* Colored Backgrounds */
 .card.pc-usage {
   background: linear-gradient(135deg, #2563eb, #3b82f6);
 }
@@ -161,19 +246,32 @@ body::-webkit-scrollbar,
   background-color: #ffffff;
   border-radius: 12px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  margin-bottom: 30px;
 }
 
 .section.active {
   display: block;
 }
-@media (max-width: 768px) {
-  .section {
-    padding: 20px;
-    margin: 10px;
-  }
+
+.section h3 {
+  font-size: 1.5rem;
+  color: #1f2937;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 8px;
 }
 
-/* ========== Activities ========== */
+body.dark .section {
+  background-color: #374151;
+  color: #f3f4f6;
+}
+
+body.dark .section h3 {
+  color: #e5e7eb;
+  border-color: #4b5563;
+}
+
+/* ========== Activity Logs ========== */
 .activity {
   margin: 0 40px 40px;
 }
@@ -184,9 +282,14 @@ body::-webkit-scrollbar,
   color: #1e3a8a;
 }
 
+body.dark .activity h3 {
+  color: #93c5fd;
+}
+
 .activity ul {
   list-style: none;
   padding: 0;
+  margin: 0;
 }
 
 .activity ul li {
@@ -198,6 +301,34 @@ body::-webkit-scrollbar,
   align-items: center;
   gap: 10px;
   font-size: 0.95rem;
+  transition: background 0.2s ease;
+}
+
+.activity ul li:hover {
+  background: #e5e7eb;
+}
+
+body.dark .activity ul li {
+  background: #4b5563;
+  color: #f3f4f6;
+}
+
+body.dark .activity ul li:hover {
+  background: #6b7280;
+}
+
+/* ========== Dark Toggle Button ========== */
+.dark-toggle {
+  background-color: #e5e7eb;
+  color: #1f2937;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  cursor: pointer;
+}
+
+body.dark .dark-toggle {
+  background-color: #374151;
+  color: #f9fafb;
 }
 
 /* ========== Animations ========== */
@@ -210,4 +341,30 @@ body::-webkit-scrollbar,
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ========== Dark Mode Toggle Button ========== */
+.dark-toggle {
+  background-color: #e5e7eb;
+  color: #1f2937;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  transition: background 0.3s ease, color 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+}
+
+.dark-toggle:hover {
+  background-color: #d1d5db;
+}
+
+body.dark .dark-toggle {
+  background-color: #374151;
+  color: #f9fafb;
+}
+
+body.dark .dark-toggle:hover {
+  background-color: #4b5563;
 }
