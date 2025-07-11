@@ -1,11 +1,11 @@
-/* Base Reset */
+/* === Base Reset === */
 body {
   margin: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   overflow-x: hidden;
 }
 
-/* Overlay for mobile */
+/* === Overlay for Mobile === */
 .overlay {
   display: none;
   position: fixed;
@@ -21,13 +21,16 @@ body {
   display: block;
   opacity: 1;
 }
+body.overlay-active {
+  overflow: hidden;
+}
 
-/* Container holds sidebar and main content */
+/* === Layout Container === */
 #container {
   display: flex;
 }
 
-/* Sidebar */
+/* === Sidebar === */
 .sidebar {
   background: linear-gradient(to bottom, #4b0000, #7c0a0a);
   color: white;
@@ -46,6 +49,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 140px;
+  flex-direction: column;
 }
 .sidebar .logo img {
   width: 70px;
@@ -53,7 +57,7 @@ body {
 }
 .sidebar .logo h1 {
   font-size: 1.1rem;
-  margin-top: 50px;
+  margin-top: 10px;
 }
 .sidebar .menu a {
   display: flex;
@@ -63,7 +67,7 @@ body {
   text-decoration: none;
   border-radius: 8px;
   margin: 5px 10px;
-  transition: background 0.2s;
+  transition: background 0.2s ease, font-weight 0.2s;
 }
 .sidebar .menu a i {
   margin-right: 10px;
@@ -74,16 +78,17 @@ body {
   font-weight: bold;
 }
 
-/* Main */
+/* === Main Section === */
 .main {
   margin-left: 250px;
   flex: 1;
   padding-bottom: 60px;
   padding-top: 20px;
   transition: margin-left 0.3s ease;
+  background-color: #f9fafb;
 }
 
-/* Header */
+/* === Header === */
 .main-header {
   position: sticky;
   top: 0;
@@ -120,7 +125,7 @@ body {
   font-size: 0.9rem;
 }
 
-/* Cards */
+/* === Cards === */
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -134,11 +139,12 @@ body {
   align-items: center;
   gap: 15px;
   color: white;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease;
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .card:hover {
   transform: translateY(-4px);
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.15);
 }
 .card.session { background: #0ea5e9; }
 .card.pc { background: #22c55e; }
@@ -148,7 +154,7 @@ body {
 .card h3 { margin: 0; font-size: 1.3rem; }
 .card p { margin: 0; font-size: 0.9rem; }
 
-/* Sections */
+/* === Section Wrapper === */
 .section {
   display: none;
   padding: 30px;
@@ -157,7 +163,7 @@ body {
   display: block;
 }
 
-/* Activity */
+/* === Activity Section === */
 .activity {
   margin: 20px 30px;
 }
@@ -180,7 +186,7 @@ body {
   gap: 10px;
 }
 
-/* Responsive Mobile */
+/* === Responsive Design === */
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
@@ -195,7 +201,4 @@ body {
   .hamburger-btn {
     display: block;
   }
-}
-body.overlay-active {
-  overflow: hidden;
 }

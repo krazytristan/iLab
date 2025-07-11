@@ -1,36 +1,45 @@
--- Create the database
+-- =========================
+-- iLab System Database Setup
+-- =========================
+
 CREATE DATABASE IF NOT EXISTS ilab_system;
 USE ilab_system;
 
--- Drop existing tables (CAUTION: dev use only)
-DROP TABLE IF EXISTS attendance_logs;
-DROP TABLE IF EXISTS notifications;
-DROP TABLE IF EXISTS feedback;
-DROP TABLE IF EXISTS pc_reservations;
-DROP TABLE IF EXISTS user_settings;
-DROP TABLE IF EXISTS student_logs;
-DROP TABLE IF EXISTS lab_activities;
-DROP TABLE IF EXISTS maintenance_requests;
-DROP TABLE IF EXISTS lab_sessions;
-DROP TABLE IF EXISTS faculty;
-DROP TABLE IF EXISTS students;
-DROP TABLE IF EXISTS pcs;
-DROP TABLE IF EXISTS password_reset_logs;
-DROP TABLE IF EXISTS login_logs;
-DROP TABLE IF EXISTS admin_users;
+-- DROP ALL TABLES (for DEV reset)
+DROP TABLE IF EXISTS 
+  attendance_logs, 
+  notifications, 
+  feedback, 
+  pc_reservations, 
+  user_settings, 
+  student_logs, 
+  lab_activities, 
+  maintenance_requests, 
+  lab_sessions, 
+  faculty, 
+  students, 
+  pcs, 
+  password_reset_logs, 
+  login_logs, 
+  admin_users, 
+  reports, 
+  user_logs,
+  student_requests,
+  lab_settings,
+  labs;
 
--- Admin Users Table
+-- ========== ADMIN USERS ==========
 CREATE TABLE admin_users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(100) NOT NULL UNIQUE,
   email VARCHAR(150) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
-  reset_token VARCHAR(255) DEFAULT NULL,
-  reset_expires DATETIME DEFAULT NULL,
+  reset_token VARCHAR(255),
+  reset_expires DATETIME,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Login Logs
+-- ========== LOGIN LOGS ==========
 CREATE TABLE login_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   admin_id INT,
@@ -40,7 +49,7 @@ CREATE TABLE login_logs (
   FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
 );
 
--- Password Reset Logs
+-- ========== PASSWORD RESET LOGS ==========
 CREATE TABLE password_reset_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(150) NOT NULL,
@@ -49,14 +58,25 @@ CREATE TABLE password_reset_logs (
   ip_address VARCHAR(45)
 );
 
--- PCs Table
+-- ========== LABS ==========
+CREATE TABLE labs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  lab_name VARCHAR(100) NOT NULL UNIQUE,
+  room_code VARCHAR(20) NOT NULL UNIQUE,
+  capacity INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ========== PCS ==========
 CREATE TABLE pcs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   pc_name VARCHAR(100) NOT NULL,
-  status ENUM('available', 'in_use', 'maintenance') DEFAULT 'available'
+  status ENUM('available', 'in_use', 'maintenance') DEFAULT 'available',
+  lab_id INT,
+  FOREIGN KEY (lab_id) REFERENCES labs(id) ON DELETE CASCADE
 );
 
--- Students Table
+-- ========== STUDENTS ==========
 CREATE TABLE students (
   id INT AUTO_INCREMENT PRIMARY KEY,
   fullname VARCHAR(150) NOT NULL,
@@ -70,7 +90,7 @@ CREATE TABLE students (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Faculty Table
+-- ========== FACULTY ==========
 CREATE TABLE faculty (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150) NOT NULL,
@@ -80,7 +100,7 @@ CREATE TABLE faculty (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Lab Sessions Table
+-- ========== LAB SESSIONS ==========
 CREATE TABLE lab_sessions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_type ENUM('student', 'faculty') NOT NULL,
@@ -92,18 +112,17 @@ CREATE TABLE lab_sessions (
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
 );
 
--- Maintenance Requests Table
+-- ========== MAINTENANCE REQUESTS ==========
 CREATE TABLE maintenance_requests (
   id INT AUTO_INCREMENT PRIMARY KEY,
   pc_id INT NOT NULL,
-  issue_description TEXT,
-  requested_by VARCHAR(150),
-  status ENUM('pending', 'in_progress', 'completed') DEFAULT 'pending',
-  requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  issue TEXT NOT NULL,
+  status ENUM('pending', 'resolved') DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
 );
 
--- Lab Activities Table
+-- ========== LAB ACTIVITIES ==========
 CREATE TABLE lab_activities (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user VARCHAR(100),
@@ -112,7 +131,7 @@ CREATE TABLE lab_activities (
   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Student Logs Table
+-- ========== STUDENT LOGS ==========
 CREATE TABLE student_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -126,7 +145,7 @@ CREATE TABLE student_logs (
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE SET NULL
 );
 
--- User Settings Table
+-- ========== USER SETTINGS ==========
 CREATE TABLE user_settings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -136,7 +155,7 @@ CREATE TABLE user_settings (
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 );
 
--- PC Reservations Table
+-- ========== PC RESERVATIONS ==========
 CREATE TABLE pc_reservations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -148,7 +167,7 @@ CREATE TABLE pc_reservations (
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
 );
 
--- ✅ Attendance Logs Table (optional: for time-in/out without PC)
+-- ========== ATTENDANCE LOGS ==========
 CREATE TABLE attendance_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -159,7 +178,7 @@ CREATE TABLE attendance_logs (
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 );
 
--- ✅ Notifications Table
+-- ========== NOTIFICATIONS ==========
 CREATE TABLE notifications (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -169,7 +188,7 @@ CREATE TABLE notifications (
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 );
 
--- ✅ Feedback Table (optional)
+-- ========== FEEDBACK ==========
 CREATE TABLE feedback (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
@@ -177,3 +196,73 @@ CREATE TABLE feedback (
   submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 );
+
+-- ========== USER LOGS ==========
+CREATE TABLE user_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  action ENUM('login', 'logout') NOT NULL,
+  pc_no VARCHAR(10),
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ========== STUDENT REQUESTS ==========
+CREATE TABLE student_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  subject VARCHAR(100) NOT NULL,
+  message TEXT NOT NULL,
+  status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+);
+
+-- ========== REPORTS ==========
+CREATE TABLE reports (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT,
+  report_type VARCHAR(100) NOT NULL,
+  details TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
+);
+
+-- ========== LAB SETTINGS ==========
+CREATE TABLE lab_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  lab_name VARCHAR(255) NOT NULL DEFAULT 'iLab Computer Center',
+  default_session_length VARCHAR(50) NOT NULL DEFAULT '1 hour',
+  max_reservations INT NOT NULL DEFAULT 3,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- ========== Insert Default Lab Settings ==========
+INSERT INTO lab_settings (lab_name, default_session_length, max_reservations)
+VALUES ('iLab Computer Center', '1 hour', 3);
+
+-- ========== Insert Lab Records ==========
+INSERT INTO labs (lab_name, room_code, capacity) VALUES 
+  ('Superlab', 'SL-101', 40),
+  ('ComputerLab', 'CL-102', 40),
+  ('InternetLab', 'IL-103', 40),
+  ('MacLab', 'ML-104', 20);
+
+-- ========== OPTIONAL: Generate Sample PCs ==========
+-- Uncomment and run this part if you want to auto-create PC entries linked to labs
+
+-- Superlab PCs
+-- INSERT INTO pcs (pc_name, lab_id) VALUES 
+--   ('Superlab-PC-01', 1), ('Superlab-PC-02', 1), ..., ('Superlab-PC-40', 1);
+
+-- ComputerLab PCs
+-- INSERT INTO pcs (pc_name, lab_id) VALUES 
+--   ('ComputerLab-PC-01', 2), ..., ('ComputerLab-PC-40', 2);
+
+-- InternetLab PCs
+-- INSERT INTO pcs (pc_name, lab_id) VALUES 
+--   ('InternetLab-PC-01', 3), ..., ('InternetLab-PC-40', 3);
+
+-- MacLab PCs
+-- INSERT INTO pcs (pc_name, lab_id) VALUES 
+--   ('MacLab-PC-01', 4), ..., ('MacLab-PC-20', 4);

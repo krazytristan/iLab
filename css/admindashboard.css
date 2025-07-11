@@ -1,4 +1,4 @@
-/* ========== Base Layout ========== */
+/* ========== Reset & Base ========== */
 html, body {
   height: 100%;
   margin: 0;
@@ -107,7 +107,6 @@ body.dark .sidebar .menu a.active {
   color: white;
 }
 
-/* Responsive Sidebar */
 .sidebar.mobile-hidden {
   left: -260px;
   position: fixed;
@@ -177,7 +176,7 @@ body.dark .main-header p {
   color: #9ca3af;
 }
 
-/* ========== Cards ========== */
+/* ========== Cards (Updated & Unified) ========== */
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -202,6 +201,23 @@ body.dark .main-header p {
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
+.card i {
+  font-size: 2rem;
+  opacity: 0.95;
+}
+
+.card h3 {
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.card p {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+/* Specific card themes */
 .card.pc-usage {
   background: linear-gradient(135deg, #2563eb, #3b82f6);
 }
@@ -222,20 +238,25 @@ body.dark .main-header p {
   background: linear-gradient(135deg, #8b5cf6, #a78bfa);
 }
 
-.card i {
-  font-size: 2rem;
-  opacity: 0.95;
+.card.reservations {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
 }
 
-.card h3 {
-  font-size: 1.6rem;
-  margin: 0;
+.card.available {
+  background: linear-gradient(135deg, #0d9488, #2dd4bf);
 }
 
-.card p {
-  margin: 0;
-  font-size: 0.95rem;
+/* Dark mode adjustments */
+body.dark .card {
+  color: #f9fafb;
+}
+
+body.dark .card p {
   opacity: 0.9;
+}
+
+body.dark .card:hover {
+  box-shadow: 0 12px 24px rgba(255, 255, 255, 0.1);
 }
 
 /* ========== Sections ========== */
@@ -317,33 +338,50 @@ body.dark .activity ul li:hover {
   background: #6b7280;
 }
 
-/* ========== Dark Toggle Button ========== */
-.dark-toggle {
-  background-color: #e5e7eb;
-  color: #1f2937;
-  border-radius: 0.375rem;
-  padding: 0.5rem;
-  cursor: pointer;
+/* ========== Notification Dropdown ========== */
+.notification-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background-color: white;
+  width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+  z-index: 100;
 }
 
-body.dark .dark-toggle {
+.notification-dropdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notification-dropdown li {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  transition: background 0.2s ease;
+}
+
+.notification-dropdown li:hover {
+  background-color: #f3f4f6;
+}
+
+body.dark .notification-dropdown {
+  background-color: #1f2937;
+  color: #f3f4f6;
+}
+
+body.dark .notification-dropdown li {
+  border-color: #374151;
+}
+
+body.dark .notification-dropdown li:hover {
   background-color: #374151;
-  color: #f9fafb;
 }
 
-/* ========== Animations ========== */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* ========== Dark Mode Toggle Button ========== */
+/* ========== Dark Toggle ========== */
 .dark-toggle {
   background-color: #e5e7eb;
   color: #1f2937;
@@ -354,6 +392,7 @@ body.dark .dark-toggle {
   align-items: center;
   justify-content: center;
   border: none;
+  cursor: pointer;
 }
 
 .dark-toggle:hover {
@@ -367,4 +406,16 @@ body.dark .dark-toggle {
 
 body.dark .dark-toggle:hover {
   background-color: #4b5563;
+}
+
+/* ========== Animations ========== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
