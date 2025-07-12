@@ -4,7 +4,7 @@ if (!isset($_SESSION['admin'])) {
   header("Location: login.php");
   exit();
 }
-require_once 'db.php';
+require_once '../includes/db.php';
 if (isset($_POST['reservation_action'])) {
   $res_id = $_POST['res_id'];
   $action = $_POST['reservation_action'];

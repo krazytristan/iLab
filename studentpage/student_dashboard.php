@@ -1,6 +1,6 @@
 <?php
 // student_dashboard.php
-require_once '../adminpage/db.php';
+require_once '../includes/db.php';
 session_start();
 
 if (!isset($_SESSION['student_id'])) {
@@ -129,11 +129,12 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
   <title>Student Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="/css/studentdashboard.css">
 </head>
 <body class="bg-gray-100 font-sans min-h-screen flex">
 
 <!-- SIDEBAR -->
-<aside class="w-64 bg-blue-900 text-white p-5 space-y-2 min-h-screen sticky top-0">
+<aside id="sidebar" class="w-64 bg-blue-900 text-white p-5 space-y-2 min-h-screen fixed md:static top-0 left-0 z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-300 overflow-y-auto hide-scrollbar">
   <div class="text-center mb-6">
     <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" class="w-16 mx-auto mb-2" />
     <h2 class="text-lg font-bold"><?= htmlspecialchars($student['fullname']) ?></h2>
@@ -157,6 +158,7 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
   </nav>
 </aside>
 
+
 <!-- MAIN CONTENT -->
 <main class="flex-1 p-6 space-y-10 overflow-y-auto relative">
 
@@ -167,10 +169,16 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
     </div>
   <?php endif; ?>
 
+  <!-- Header with Hamburger -->
   <div class="flex justify-between items-center relative">
-    <h1 class="text-2xl font-bold">Welcome, <?= htmlspecialchars($student['fullname']) ?></h1>
-    
-    <!-- Clock and Notifications -->
+    <div class="flex items-center">
+      <button id="toggleSidebar" class="md:hidden text-blue-800 text-2xl mr-4 focus:outline-none">
+        <i class="fas fa-bars"></i>
+      </button>
+      <h1 class="text-2xl font-bold">Welcome, <?= htmlspecialchars($student['fullname']) ?></h1>
+    </div>
+
+    <!-- Clock and Notification -->
     <div class="flex items-center gap-4 relative">
       <div id="clock" class="text-lg font-mono text-gray-800"></div>
       <button id="notif-btn" class="relative text-gray-600 hover:text-blue-700">
@@ -180,27 +188,30 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
           <span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full"></span>
         <?php endif; ?>
       </button>
-
-      <!-- Dropdown -->
-      <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-72 bg-white border rounded shadow-md z-50">
-        <div class="p-3 font-semibold text-sm text-gray-700 border-b">Notifications</div>
-        <ul class="max-h-64 overflow-y-auto text-sm">
-          <?php if (!empty($notifications)): ?>
-            <?php foreach ($notifications as $notif): ?>
-              <li class="p-3 border-b hover:bg-gray-100">
-                <?= htmlspecialchars($notif['message']) ?><br>
-                <small class="text-gray-500">
-                  <?= date('M d, h:i A', strtotime($notif['created_at'])) ?>
-                </small>
-              </li>
-            <?php endforeach; ?>
-          <?php else: ?>
-            <li class="p-3 text-gray-500">No notifications</li>
-          <?php endif; ?>
-        </ul>
-      </div>
     </div>
   </div>
+    </button>
+
+    <!-- Dropdown -->
+    <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-72 bg-white border rounded shadow-md z-50">
+      <div class="p-3 font-semibold text-sm text-gray-700 border-b">Notifications</div>
+      <ul class="max-h-64 overflow-y-auto text-sm">
+        <?php if (!empty($notifications)): ?>
+          <?php foreach ($notifications as $notif): ?>
+            <li class="p-3 border-b hover:bg-gray-100">
+              <?= htmlspecialchars($notif['message']) ?><br>
+              <small class="text-gray-500">
+                <?= date('M d, h:i A', strtotime($notif['created_at'])) ?>
+              </small>
+            </li>
+          <?php endforeach; ?>
+        <?php else: ?>
+          <li class="p-3 text-gray-500">No notifications</li>
+        <?php endif; ?>
+      </ul>
+    </div>
+  </div>
+</div>
 
   <!-- DASHBOARD -->
   <section id="dashboard" class="section">
@@ -228,31 +239,46 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
 <!-- PC STATUS -->
 <section id="pcstatus" class="section hidden">
   <h2 class="text-2xl font-semibold mb-6 text-gray-800">PC Status by Laboratory</h2>
-  <?php
-    $grouped_pcs = [];
-    foreach ($pcsData as $pc) {
-      preg_match('/^(.*?)-PC-(\d+)$/', $pc['pc_name'], $matches);
-      $labGroup = $matches[1] ?? 'Other';
-      $grouped_pcs[$labGroup][] = $pc;
-    }
-  ?>
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <?php
+      $grouped_pcs = [];
+      foreach ($pcsData as $pc) {
+        preg_match('/^(.*?)-PC-(\d+)$/', $pc['pc_name'], $matches);
+        $labGroup = $matches[1] ?? 'Other';
+        $grouped_pcs[$labGroup][] = $pc;
+      }
+    ?>
+
     <?php foreach ($grouped_pcs as $lab => $pcs): ?>
-      <div class="bg-white shadow rounded-lg p-4">
-        <h3 class="text-xl font-bold text-blue-900 mb-4"><?= htmlspecialchars($lab) ?></h3>
-        <div class="grid grid-cols-4 gap-2">
-          <?php foreach ($pcs as $pc): ?>
-            <div class="p-2 rounded text-center text-xs font-semibold
-              <?= $pc['status'] === 'available' ? 'bg-green-100 text-green-800' : ($pc['status'] === 'in_use' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800') ?>">
-              <?= htmlspecialchars($pc['pc_name']) ?><br>
-              <small><?= ucfirst($pc['status']) ?></small>
-            </div>
-          <?php endforeach; ?>
+      <div class="bg-white shadow rounded-xl p-5 flex flex-col justify-between">
+        <div>
+          <h3 class="text-xl font-bold text-blue-900 mb-2"><?= htmlspecialchars($lab) ?></h3>
+          <p class="text-sm text-gray-500"><?= count($pcs) ?> PCs in this lab</p>
         </div>
+        <button
+          class="open-modal mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm"
+          data-lab="<?= htmlspecialchars($lab) ?>"
+          data-pcs='<?= json_encode($pcs) ?>'
+        >
+          View PCs
+        </button>
       </div>
     <?php endforeach; ?>
   </div>
 </section>
+<div id="pcModal" class="fixed inset-0 hidden bg-black bg-opacity-50 z-50 flex items-center justify-center">
+  <div class="bg-white w-full max-w-3xl rounded-lg shadow-lg overflow-y-auto max-h-[80vh]">
+    <div class="flex justify-between items-center p-4 border-b">
+      <h3 id="modalLabName" class="text-xl font-bold text-blue-800">Lab Name</h3>
+      <button id="closeModal" class="text-gray-500 hover:text-red-600 text-2xl font-bold">&times;</button>
+    </div>
+    <div id="modalPcList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 p-4">
+      <!-- PCs are dynamically injected here -->
+    </div>
+  </div>
+</div>
+
 
 <!-- RESERVE PC -->
 <section id="reserve" class="section hidden">
@@ -410,6 +436,70 @@ $availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELEC
       });
     });
   });
+
+document.addEventListener("DOMContentLoaded", () => {
+  const modal = document.getElementById("pcModal");
+  const closeModal = document.getElementById("closeModal");
+  const modalLabName = document.getElementById("modalLabName");
+  const modalPcList = document.getElementById("modalPcList");
+
+  document.querySelectorAll(".open-modal").forEach(button => {
+    button.addEventListener("click", () => {
+      const labName = button.dataset.lab;
+      const pcs = JSON.parse(button.dataset.pcs);
+
+      modalLabName.textContent = labName;
+      modalPcList.innerHTML = "";
+
+      pcs.forEach(pc => {
+        const color = pc.status === 'available' ? 'green' : (pc.status === 'in_use' ? 'yellow' : 'red');
+        const icon = pc.status === 'available' ? 'fa-check-circle' : (pc.status === 'in_use' ? 'fa-hourglass-half' : 'fa-times-circle');
+
+        const pcCard = document.createElement("div");
+        pcCard.className = "bg-gray-50 border rounded shadow-sm p-3 text-center";
+
+        pcCard.innerHTML = `
+          <div class="text-sm font-semibold mb-1">${pc.pc_name}</div>
+          <div class="text-${color}-600 text-xs flex items-center justify-center gap-1">
+            <i class="fas ${icon}"></i> ${pc.status.charAt(0).toUpperCase() + pc.status.slice(1)}
+          </div>
+        `;
+
+        modalPcList.appendChild(pcCard);
+      });
+
+      modal.classList.remove("hidden");
+    });
+  });
+
+  closeModal.addEventListener("click", () => {
+    modal.classList.add("hidden");
+  });
+
+  modal.addEventListener("click", e => {
+    if (e.target === modal) {
+      modal.classList.add("hidden");
+    }
+  });
+});
+document.addEventListener("DOMContentLoaded", () => {
+  const toggleSidebar = document.getElementById("toggleSidebar");
+  const sidebar = document.getElementById("sidebar");
+  const navLinks = document.querySelectorAll(".nav-link");
+
+  toggleSidebar?.addEventListener("click", () => {
+    sidebar.classList.toggle("-translate-x-full");
+  });
+
+  navLinks.forEach(link => {
+    link.addEventListener("click", () => {
+      // Auto-close sidebar only on mobile
+      if (window.innerWidth < 768) {
+        sidebar.classList.add("-translate-x-full");
+      }
+    });
+  });
+});
 </script>
 </body>
 </html>
