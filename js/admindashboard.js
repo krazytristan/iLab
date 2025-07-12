@@ -48,3 +48,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+  const facultySearch = document.getElementById('facultySearch');
+  if (facultySearch) {
+    facultySearch.addEventListener('input', function () {
+      const term = this.value.toLowerCase();
+      document.querySelectorAll('#facultyTable tbody tr').forEach(row => {
+        row.style.display = row.dataset.faculty.includes(term) ? '' : 'none';
+      });
+    });
+  }

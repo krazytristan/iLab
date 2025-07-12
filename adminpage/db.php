@@ -1,20 +1,31 @@
 <?php
+// Database Configuration
 $host = "localhost";
 $db   = "ilab_system";
 $user = "root";
 $pass = "";
 
-// Enable strict error reporting for mysqli
+// Toggle Debug Mode (Set to false in production)
+$debug_mode = true;
+
+// Enable MySQLi strict reporting
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 try {
-    // Create the MySQLi connection
+    // Establish the connection
     $conn = new mysqli($host, $user, $pass, $db);
-    
-    // Set character encoding to UTF-8
+
+    // Set character encoding
     $conn->set_charset("utf8mb4");
+
 } catch (mysqli_sql_exception $e) {
-    // Show detailed error in dev only (comment in production)
-    die("Database connection failed: " . $e->getMessage());
+    if ($debug_mode) {
+        // Development: Show full error message
+        die("❌ Database connection failed: " . $e->getMessage());
+    } else {
+        // Production: Log error and show generic message
+        error_log("Database connection error: " . $e->getMessage());
+        die("We’re experiencing technical issues. Please try again later.");
+    }
 }
 ?>

@@ -218,40 +218,58 @@ $availablePCs = $conn->query("
     <?php endif; ?>
   </section>
 
-  <!-- PC STATUS -->
-  <section id="pcstatus" class="section hidden">
-    <h2 class="text-xl font-semibold mb-4">PC Status</h2>
-    <ul class="space-y-2">
-      <?php foreach ($pcsData as $pc): ?>
-        <li class="p-2 border rounded <?= $pc['status'] === 'available' ? 'bg-green-100' : 'bg-red-100' ?>">
-          <?= htmlspecialchars($pc['pc_name']) ?> - <strong><?= $pc['status'] ?></strong>
-        </li>
-      <?php endforeach; ?>
-    </ul>
-  </section>
+<!-- PC STATUS -->
+<section id="pcstatus" class="section hidden">
+  <h2 class="text-2xl font-semibold mb-6 text-gray-800">PC Status by Laboratory</h2>
+  <?php
+    $grouped_pcs = [];
+    foreach ($pcsData as $pc) {
+      preg_match('/^(.*?)-PC-(\d+)$/', $pc['pc_name'], $matches);
+      $labGroup = $matches[1] ?? 'Other';
+      $grouped_pcs[$labGroup][] = $pc;
+    }
+  ?>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+    <?php foreach ($grouped_pcs as $lab => $pcs): ?>
+      <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-xl font-bold text-blue-900 mb-4"><?= htmlspecialchars($lab) ?></h3>
+        <div class="grid grid-cols-4 gap-2">
+          <?php foreach ($pcs as $pc): ?>
+            <div class="p-2 rounded text-center text-xs font-semibold
+              <?= $pc['status'] === 'available' ? 'bg-green-100 text-green-800' : ($pc['status'] === 'in_use' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800') ?>">
+              <?= htmlspecialchars($pc['pc_name']) ?><br>
+              <small><?= ucfirst($pc['status']) ?></small>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    <?php endforeach; ?>
+  </div>
+</section>
 
-  <!-- RESERVE PC -->
-  <section id="reserve" class="section hidden">
-    <h2 class="text-xl font-semibold mb-4">Reserve a PC</h2>
-    <?php if (isset($reserve_msg)): ?>
-      <p class="mb-4 text-blue-600 font-medium"><?= htmlspecialchars($reserve_msg) ?></p>
-    <?php endif; ?>
-    <form action="reserve_pc.php" method="POST" class="space-y-4">
-      <label>Select PC to Reserve</label>
-      <select name="pc_id" required class="w-full px-3 py-2 border rounded">
-        <?php while ($pc = $availablePCs->fetch_assoc()): ?>
-          <option value="<?= $pc['id'] ?>"><?= htmlspecialchars($pc['pc_name']) ?></option>
-        <?php endwhile; ?>
+<!-- RESERVE PC -->
+<section id="reserve" class="section hidden">
+  <h2 class="text-2xl font-semibold mb-6 text-gray-800">Reserve a PC</h2>
+  <form method="POST" class="space-y-6">
+    <div>
+      <label class="block mb-1 font-medium">Select Laboratory</label>
+      <select id="lab-select" class="w-full px-3 py-2 border rounded" required>
+        <option value="">-- Choose Lab --</option>
+        <?php foreach ($grouped_pcs as $lab => $pcs): ?>
+          <option value="<?= htmlspecialchars($lab) ?>"><?= htmlspecialchars($lab) ?></option>
+        <?php endforeach; ?>
       </select>
+    </div>
 
-      <label>Reservation Time</label>
-      <input type="datetime-local" name="reservation_time" class="w-full px-3 py-2 border rounded" required>
+    <div id="pc-boxes" class="grid grid-cols-4 gap-3 hidden"></div>
 
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-        Reserve
-      </button>
-    </form>
-  </section>
+    <input type="hidden" name="reserve_pc_id" id="reserve_pc_id" />
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+      Reserve
+    </button>
+  </form>
+</section>
 
   <!-- REQUEST ASSISTANCE -->
   <section id="request" class="section hidden">
@@ -352,6 +370,37 @@ $availablePCs = $conn->query("
       if (!notifBtn.contains(e.target) && !notifDropdown.contains(e.target)) {
         notifDropdown?.classList.add("hidden");
       }
+    });
+  });
+
+    document.addEventListener("DOMContentLoaded", () => {
+    const pcMap = <?php echo json_encode($grouped_pcs); ?>;
+    const labSelect = document.getElementById("lab-select");
+    const pcBoxes = document.getElementById("pc-boxes");
+    const reservePcId = document.getElementById("reserve_pc_id");
+
+    labSelect.addEventListener("change", () => {
+      const lab = labSelect.value;
+      pcBoxes.innerHTML = "";
+      reservePcId.value = "";
+      if (!lab || !pcMap[lab]) {
+        pcBoxes.classList.add("hidden");
+        return;
+      }
+      pcBoxes.classList.remove("hidden");
+      pcMap[lab].forEach(pc => {
+        const box = document.createElement("div");
+        box.className = `cursor-pointer p-2 text-center text-xs rounded font-semibold ${pc.status === 'available' ? 'bg-green-100 text-green-800' : pc.status === 'in_use' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`;
+        box.innerHTML = pc.pc_name;
+        if (pc.status === 'available') {
+          box.addEventListener("click", () => {
+            reservePcId.value = pc.id;
+            document.querySelectorAll("#pc-boxes div").forEach(el => el.classList.remove("ring", "ring-2", "ring-blue-600"));
+            box.classList.add("ring", "ring-2", "ring-blue-600");
+          });
+        }
+        pcBoxes.appendChild(box);
+      });
     });
   });
 </script>
