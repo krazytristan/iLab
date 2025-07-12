@@ -99,10 +99,19 @@ $log_stmt->execute();
 $logs = $log_stmt->get_result();
 
 // Fetch notifications
-$notif_stmt = $conn->prepare("SELECT id, message, created_at FROM notifications WHERE student_id = ? ORDER BY created_at DESC LIMIT 10");
-$notif_stmt->bind_param("i", $student_id);
-$notif_stmt->execute();
-$notifications = $notif_stmt->get_result();
+$query = "SELECT id, message, is_read, created_at FROM notifications 
+          WHERE recipient_type = 'student' AND recipient_id = ? 
+          ORDER BY created_at DESC";
+
+$stmt = $conn->prepare($query);
+$stmt->bind_param("i", $student_id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+$notifications = [];
+while ($row = $result->fetch_assoc()) {
+  $notifications[] = $row;
+}
 
 // All PCs
 $availablePCs = $conn->query("
@@ -114,7 +123,6 @@ $availablePCs = $conn->query("
     SELECT pc_id FROM maintenance_requests WHERE status = 'pending'
   )
 ");
-
 ?>
 
 <!DOCTYPE html>
