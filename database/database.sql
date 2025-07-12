@@ -1,5 +1,5 @@
 -- =========================
--- iLab System Database Setup
+-- iLab System Database Setup (Updated)
 -- =========================
 
 CREATE DATABASE IF NOT EXISTS ilab_system;
@@ -91,12 +91,12 @@ CREATE TABLE students (
 );
 
 -- ========== FACULTY ==========
-CREATE TABLE IF NOT EXISTS faculty (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    fullname VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE faculty (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  fullname VARCHAR(100) NOT NULL,
+  email VARCHAR(100) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ========== LAB SESSIONS ==========
@@ -162,6 +162,7 @@ CREATE TABLE pc_reservations (
   reservation_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME DEFAULT NULL,
   status ENUM('pending', 'reserved', 'cancelled') DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
 );
