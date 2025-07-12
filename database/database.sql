@@ -180,11 +180,12 @@ CREATE TABLE attendance_logs (
 -- ========== NOTIFICATIONS ==========
 CREATE TABLE notifications (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  recipient_type ENUM('student', 'admin') NOT NULL, -- Who receives it
-  recipient_id INT NOT NULL,                        -- Student ID or Admin ID
+  recipient_type ENUM('student', 'admin') NOT NULL,
+  recipient_id INT NOT NULL,
   message TEXT NOT NULL,
   is_read BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_recipient (recipient_type, recipient_id)
 );
 
 -- ========== FEEDBACK ==========

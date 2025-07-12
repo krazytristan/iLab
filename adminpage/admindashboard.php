@@ -5,7 +5,48 @@ if (!isset($_SESSION['admin'])) {
   exit();
 }
 require_once 'db.php';
+if (isset($_POST['reservation_action'])) {
+  $res_id = $_POST['res_id'];
+  $action = $_POST['reservation_action'];
 
+  // Fetch reservation info
+  $stmt = $conn->prepare("SELECT pc_id, student_id FROM pc_reservations WHERE id = ? AND status = 'reserved'");
+  $stmt->bind_param("i", $res_id);
+  $stmt->execute();
+  $res = $stmt->get_result()->fetch_assoc();
+
+  if ($res) {
+    $pc_id = $res['pc_id'];
+    $student_id = $res['student_id'];
+
+    if ($action === 'approve') {
+      // 1. Set PC status to in_use
+      $conn->query("UPDATE pcs SET status = 'in_use' WHERE id = $pc_id");
+
+      // 2. Insert to lab_sessions
+      $conn->query("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', $student_id, $pc_id, 'active', NOW())");
+
+      // 3. Update reservation status
+      $conn->query("UPDATE pc_reservations SET status = 'approved' WHERE id = $res_id");
+
+      // 4. Notify student
+      $msg = "✅ Your PC reservation (PC #$pc_id) has been approved.";
+      $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
+      $notif_stmt->bind_param("is", $student_id, $msg);
+      $notif_stmt->execute();
+
+    } elseif ($action === 'cancel') {
+      $conn->query("UPDATE pc_reservations SET status = 'cancelled' WHERE id = $res_id");
+
+      $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled by the admin.";
+      $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
+      $notif_stmt->bind_param("is", $student_id, $msg);
+      $notif_stmt->execute();
+    }
+  }
+  header("Location: admin_dashboard.php#reservations");
+  exit();
+}
 // Summary Cards
 $totalPCs = $conn->query("SELECT COUNT(*) AS total FROM pcs")->fetch_assoc()['total'] ?? 40;
 $pcUsed = $conn->query("SELECT COUNT(*) AS used FROM lab_sessions WHERE status = 'active'")->fetch_assoc()['used'] ?? 0;
@@ -43,25 +84,33 @@ $studentRequests = $conn->query("
   ORDER BY r.created_at DESC
 ");
 
-// ==== REPORTS SECTION ==== //
+// Reports Section
 $reports = $conn->query("SELECT r.id, r.report_type, r.details, r.created_at, s.fullname AS student
                           FROM reports r
                           LEFT JOIN students s ON r.student_id = s.id
                           ORDER BY r.created_at DESC");
 
-// ==== MAINTENANCE SECTION ==== //
+// Maintenance Section
 $maintenanceList = $conn->query("SELECT m.id, m.pc_id, p.pc_name, m.issue, m.status, m.created_at
                                   FROM maintenance_requests m
                                   JOIN pcs p ON m.pc_id = p.id
                                   ORDER BY m.created_at DESC");
 
-// ==== SETTINGS SECTION (Placeholder) ====
+// Settings Section (Placeholder)
 $labSettingsResult = $conn->query("SELECT * FROM lab_settings LIMIT 1");
 $labSettings = $labSettingsResult->fetch_assoc();
 
 // Notifications
-$notifications = $conn->query("SELECT n.message, n.created_at, s.fullname FROM notifications n JOIN students s ON n.student_id = s.id ORDER BY n.created_at DESC LIMIT 5");
-$newNotiCount = $conn->query("SELECT COUNT(*) AS count FROM notifications WHERE is_read = 0")->fetch_assoc()['count'] ?? 0;
+$notifications_sql = "
+  SELECT n.message, n.created_at, s.fullname
+  FROM notifications n
+  LEFT JOIN students s ON n.recipient_id = s.id
+  WHERE n.recipient_type = 'admin'
+  ORDER BY n.created_at DESC
+";
+
+$notifications = $conn->query($notifications_sql);
+$newNotiCount = $notifications->num_rows ?? 0;
 ?>
 
 <!DOCTYPE html>
@@ -217,85 +266,95 @@ $newNotiCount = $conn->query("SELECT COUNT(*) AS count FROM notifications WHERE 
         </ul>
       </div>
     </section>
-
-    <section id="reservations" class="section">
-      <h3 class="text-lg font-semibold mb-4">Latest PC Reservations</h3>
-      <div class="flex justify-between items-center mb-3">
-        <input type="text" id="resSearch" placeholder="Search..." class="border px-2 py-1 rounded w-1/2">
-        <a href="export_reservations.php" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
-          <i class="fas fa-file-csv"></i> Export CSV
-        </a>
-      </div>
-      <table class="w-full border border-gray-300 dark:border-gray-700" id="resTable">
-        <thead class="bg-gray-200 dark:bg-gray-800">
-          <tr>
-            <th class="px-4 py-2 text-left">Student</th>
-            <th class="px-4 py-2 text-left">PC</th>
-            <th class="px-4 py-2 text-left">Time</th>
-            <th class="px-4 py-2 text-left">Status</th>
-            <th class="px-4 py-2 text-left">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php while($r = $reservations->fetch_assoc()): ?>
-            <tr class="border-t border-gray-300 dark:border-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name']) ?>">
-              <td class="px-4 py-2"><?= htmlspecialchars($r['fullname']) ?></td>
-              <td class="px-4 py-2"><?= htmlspecialchars($r['pc_name']) ?></td>
-              <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($r['reservation_time'])) ?></td>
-              <td class="px-4 py-2 status"><?= ucfirst($r['status']) ?></td>
-              <td class="px-4 py-2">
-                <?php if ($r['status'] === 'reserved'): ?>
-                  <button data-id="<?= $r['id'] ?>" data-action="approve" class="res-action bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
-                  <button data-id="<?= $r['id'] ?>" data-action="cancel" class="res-action bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700">Cancel</button>
-                <?php else: ?>
-                  <span class="text-gray-400 italic">—</span>
-                <?php endif; ?>
-              </td>
-            </tr>
-          <?php endwhile; ?>
-        </tbody>
-      </table>
-    </section>
     
-    <!-- User Logs -->
-    <section id="userlogs" class="section">
-      <h3 class="text-lg font-semibold mb-4">User Logs</h3>
-      <div class="flex justify-between items-center mb-3">
-        <input type="text" id="logSearch" placeholder="Search logs..." class="border px-2 py-1 rounded w-1/2">
-        <a href="export_user_logs.php" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-          <i class="fas fa-file-csv"></i> Export CSV
-        </a>
-      </div>
+<section id="reservations" class="section">
+  <h3 class="text-lg font-semibold mb-4">Latest PC Reservations</h3>
+  <div class="flex justify-between items-center mb-3">
+    <input type="text" id="resSearch" placeholder="Search..." class="border px-2 py-1 rounded w-1/2">
+    <a href="export_reservations.php" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+      <i class="fas fa-file-csv"></i> Export CSV
+    </a>
+  </div>
+  <table class="w-full border border-gray-300 dark:border-gray-700" id="resTable">
+    <thead class="bg-gray-200 dark:bg-gray-800">
+      <tr>
+        <th class="px-4 py-2 text-left">Student</th>
+        <th class="px-4 py-2 text-left">PC</th>
+        <th class="px-4 py-2 text-left">Time</th>
+        <th class="px-4 py-2 text-left">Status</th>
+        <th class="px-4 py-2 text-left">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php while($r = $reservations->fetch_assoc()): ?>
+        <tr class="border-t border-gray-300 dark:border-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name']) ?>">
+          <td class="px-4 py-2"><?= htmlspecialchars($r['fullname']) ?></td>
+          <td class="px-4 py-2"><?= htmlspecialchars($r['pc_name']) ?></td>
+          <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($r['reservation_time'])) ?></td>
+          <td class="px-4 py-2 status"><?= ucfirst($r['status']) ?></td>
+          <td class="px-4 py-2">
+            <?php if (in_array($r['status'], ['reserved', 'pending'])): ?>
+              <button data-id="<?= $r['id'] ?>" data-action="approve" class="res-action bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
+              <button data-id="<?= $r['id'] ?>" data-action="cancel" class="res-action bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700">Cancel</button>
+            <?php else: ?>
+              <span class="text-gray-400 italic">N/A</span>
+            <?php endif; ?>
+          </td>
+        </tr>
+      <?php endwhile; ?>
+    </tbody>
+  </table>
+</section>
 
-      <table class="w-full border border-gray-300 dark:border-gray-700" id="logTable">
-        <thead class="bg-gray-200 dark:bg-gray-800">
-          <tr>
-            <th class="px-4 py-2 text-left">User</th>
-            <th class="px-4 py-2 text-left">Action</th>
-            <th class="px-4 py-2 text-left">PC No</th>
-            <th class="px-4 py-2 text-left">Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if ($userLogs && $userLogs->num_rows > 0): ?>
-            <?php while ($log = $userLogs->fetch_assoc()): ?>
-              <tr class="border-t border-gray-300 dark:border-gray-700" data-log="<?= strtolower($log['fullname'] . ' ' . $log['action'] . ' ' . $log['pc_no']) ?>">
-                <td class="px-4 py-2"><?= htmlspecialchars($log['fullname']) ?></td>
-                <td class="px-4 py-2">
-                  <span class="inline-block px-2 py-1 rounded bg-gray-100 dark:bg-gray-700">
-                    <?= strtoupper($log['action']) ?>
-                  </span>
-                </td>
-                <td class="px-4 py-2"><?= htmlspecialchars($log['pc_no']) ?></td>
-                <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($log['timestamp'])) ?></td>
+<!-- Modal Template -->
+<div id="confirmationModal" class="fixed inset-0 hidden items-center justify-center bg-black bg-opacity-50 z-50">
+  <div class="bg-white p-6 rounded shadow-xl w-full max-w-md">
+    <p class="mb-4 text-gray-800">Are you sure you want to <span id="modalAction" class="font-bold"></span> this reservation?</p>
+    <div class="flex justify-end space-x-2">
+      <button id="cancelModalBtn" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">Cancel</button>
+      <button id="confirmModalBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Confirm</button>
+    </div>
+  </div>
+</div>
+
+        <!-- User Logs -->
+        <section id="userlogs" class="section">
+          <h3 class="text-lg font-semibold mb-4">User Logs</h3>
+          <div class="flex justify-between items-center mb-3">
+            <input type="text" id="logSearch" placeholder="Search logs..." class="border px-2 py-1 rounded w-1/2">
+            <a href="export_user_logs.php" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+              <i class="fas fa-file-csv"></i> Export CSV
+            </a>
+          </div>
+          <table class="w-full border border-gray-300 dark:border-gray-700" id="logTable">
+            <thead class="bg-gray-200 dark:bg-gray-800">
+              <tr>
+                <th class="px-4 py-2 text-left">User</th>
+                <th class="px-4 py-2 text-left">Action</th>
+                <th class="px-4 py-2 text-left">PC No</th>
+                <th class="px-4 py-2 text-left">Time</th>
               </tr>
-            <?php endwhile; ?>
-          <?php else: ?>
-            <tr><td colspan="4" class="px-4 py-3 text-center text-gray-500">No user logs available.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </section>
+            </thead>
+            <tbody>
+              <?php if ($userLogs && $userLogs->num_rows > 0): ?>
+                <?php while ($log = $userLogs->fetch_assoc()): ?>
+                  <tr class="border-t border-gray-300 dark:border-gray-700" data-log="<?= strtolower($log['fullname'] . ' ' . $log['action'] . ' ' . $log['pc_no']) ?>">
+                    <td class="px-4 py-2"><?= htmlspecialchars($log['fullname']) ?></td>
+                    <td class="px-4 py-2">
+                      <span class="inline-block px-2 py-1 rounded bg-gray-100 dark:bg-gray-700">
+                        <?= strtoupper($log['action']) ?>
+                      </span>
+                    </td>
+                    <td class="px-4 py-2"><?= htmlspecialchars($log['pc_no']) ?></td>
+                    <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($log['timestamp'])) ?></td>
+                  </tr>
+                <?php endwhile; ?>
+              <?php else: ?>
+                <tr><td colspan="4" class="px-4 py-3 text-center text-gray-500">No user logs available.</td></tr>
+              <?php endif; ?>
+            </tbody>
+          </table>
+        </section>
 
    <section id="requests" class="section">
   <h3 class="text-lg font-semibold mb-4">Student Requests</h3>

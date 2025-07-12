@@ -1,11 +1,13 @@
 <?php
+// student_dashboard.php
+require_once '../adminpage/db.php';
 session_start();
+
 if (!isset($_SESSION['student_id'])) {
   header("Location: student_login.php");
   exit();
 }
 
-require_once '../adminpage/db.php';
 $student_id = $_SESSION['student_id'];
 
 // Fetch student info
@@ -14,7 +16,6 @@ $student_stmt->bind_param("i", $student_id);
 $student_stmt->execute();
 $student = $student_stmt->get_result()->fetch_assoc();
 
-// Flash message
 $flash_message = $_SESSION['flash_message'] ?? '';
 unset($_SESSION['flash_message']);
 
@@ -22,42 +23,48 @@ unset($_SESSION['flash_message']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) {
   $desc = trim($_POST['help_description']);
   $pc_id = $_POST['help_pc_id'];
-  $request_stmt = $conn->prepare("INSERT INTO maintenance_requests (pc_id, issue_description, requested_by) VALUES (?, ?, ?)");
-  $request_stmt->bind_param("iss", $pc_id, $desc, $student['fullname']);
+  $request_stmt = $conn->prepare("INSERT INTO maintenance_requests (pc_id, issue, status, created_at) VALUES (?, ?, 'pending', NOW())");
+  $request_stmt->bind_param("is", $pc_id, $desc);
   $request_stmt->execute();
+
+  // Notify admin
+  $admin_notif = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'admin', ?)");
+  $admin_message = "Student {$student['fullname']} requested assistance on PC #$pc_id.";
+  $admin_id = 1; // assuming admin id is 1
+  $admin_notif->bind_param("is", $admin_id, $admin_message);
+  $admin_notif->execute();
+
   $_SESSION['flash_message'] = "✅ Assistance request submitted!";
   header("Location: student_dashboard.php#request");
   exit();
 }
 
-// Handle PC reservation
+// Handle PC reservation request (pending approval)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id'])) {
   $reserve_pc_id = $_POST['reserve_pc_id'];
+
+  // Check if already reserved or in use
   $check_stmt = $conn->prepare("SELECT status FROM pcs WHERE id = ?");
   $check_stmt->bind_param("i", $reserve_pc_id);
   $check_stmt->execute();
   $status = $check_stmt->get_result()->fetch_assoc()['status'];
 
   if ($status === 'available') {
-    $reserve_stmt = $conn->prepare("UPDATE pcs SET status = 'in_use' WHERE id = ?");
-    $reserve_stmt->bind_param("i", $reserve_pc_id);
+    // Insert pending reservation
+    $reserve_stmt = $conn->prepare("INSERT INTO pc_reservations (student_id, pc_id, status, created_at) VALUES (?, ?, 'pending', NOW())");
+    $reserve_stmt->bind_param("ii", $student_id, $reserve_pc_id);
     $reserve_stmt->execute();
 
-    $conn->query("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', $student_id, $reserve_pc_id, 'active', NOW())");
+    // Notify admin
+    $admin_id = 1;
+    $admin_notif = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'admin', ?)");
+    $admin_msg = "🖥️ Student {$student['fullname']} requested to reserve PC #$reserve_pc_id.";
+    $admin_notif->bind_param("is", $admin_id, $admin_msg);
+    $admin_notif->execute();
 
-    $notif_msg = "✅ Your reservation for PC #$reserve_pc_id has been approved.";
-    $notif_stmt = $conn->prepare("INSERT INTO notifications (student_id, message) VALUES (?, ?)");
-    $notif_stmt->bind_param("is", $student_id, $notif_msg);
-    $notif_stmt->execute();
-
-    $_SESSION['flash_message'] = $notif_msg;
+    $_SESSION['flash_message'] = "⌚ Reservation request submitted. Please wait for admin approval.";
   } else {
-    $notif_msg = "⚠️ Your reservation request for PC #$reserve_pc_id was disapproved. PC not available.";
-    $notif_stmt = $conn->prepare("INSERT INTO notifications (student_id, message) VALUES (?, ?)");
-    $notif_stmt->bind_param("is", $student_id, $notif_msg);
-    $notif_stmt->execute();
-
-    $_SESSION['flash_message'] = $notif_msg;
+    $_SESSION['flash_message'] = "⚠️ Reservation failed. PC is currently unavailable.";
   }
   header("Location: student_dashboard.php#reserve");
   exit();
@@ -68,12 +75,13 @@ if (isset($_POST['time_out'])) {
   $timeout_stmt = $conn->prepare("UPDATE lab_sessions SET status = 'inactive', logout_time = NOW() WHERE user_type='student' AND user_id = ? AND status = 'active'");
   $timeout_stmt->bind_param("i", $student_id);
   $timeout_stmt->execute();
+
   $_SESSION['flash_message'] = "✅ You have logged out from the session.";
   header("Location: student_dashboard.php");
   exit();
 }
 
-// Fetch active session
+// Active session
 $active_stmt = $conn->prepare("SELECT pc_id, login_time FROM lab_sessions WHERE user_type='student' AND user_id = ? AND status = 'active' ORDER BY login_time DESC LIMIT 1");
 $active_stmt->bind_param("i", $student_id);
 $active_stmt->execute();
@@ -85,44 +93,32 @@ $session_time = ($sessionResult && isset($sessionResult['login_time']))
     ? round((time() - strtotime($sessionResult['login_time'])) / 60) . ' minutes' 
     : '-';
 
-// Fetch PCs
+// Get all PCs
 $pcsData = [];
 $pcsResult = $conn->query("SELECT id, pc_name, status FROM pcs");
 while ($row = $pcsResult->fetch_assoc()) {
   $pcsData[] = $row;
 }
 
-// Fetch logs
+// Recent logs
 $log_stmt = $conn->prepare("SELECT pcs.pc_name, ls.login_time, ls.logout_time, ls.status FROM lab_sessions ls JOIN pcs ON pcs.id = ls.pc_id WHERE ls.user_type='student' AND ls.user_id = ? ORDER BY ls.login_time DESC LIMIT 10");
 $log_stmt->bind_param("i", $student_id);
 $log_stmt->execute();
 $logs = $log_stmt->get_result();
 
-// Fetch notifications
-$query = "SELECT id, message, is_read, created_at FROM notifications 
-          WHERE recipient_type = 'student' AND recipient_id = ? 
-          ORDER BY created_at DESC";
-
+// Notifications
+$query = "SELECT id, message, is_read, created_at FROM notifications WHERE recipient_type = 'student' AND recipient_id = ? ORDER BY created_at DESC";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $student_id);
 $stmt->execute();
 $result = $stmt->get_result();
-
 $notifications = [];
 while ($row = $result->fetch_assoc()) {
   $notifications[] = $row;
 }
 
-// All PCs
-$availablePCs = $conn->query("
-  SELECT id, pc_name FROM pcs 
-  WHERE id NOT IN (
-    SELECT pc_id FROM pc_reservations WHERE status = 'reserved'
-  ) 
-  AND id NOT IN (
-    SELECT pc_id FROM maintenance_requests WHERE status = 'pending'
-  )
-");
+// Available PCs for reservation
+$availablePCs = $conn->query("SELECT id, pc_name FROM pcs WHERE id NOT IN (SELECT pc_id FROM pc_reservations WHERE status = 'pending' OR status = 'reserved') AND id NOT IN (SELECT pc_id FROM maintenance_requests WHERE status = 'pending')");
 ?>
 
 <!DOCTYPE html>
@@ -179,7 +175,7 @@ $availablePCs = $conn->query("
       <div id="clock" class="text-lg font-mono text-gray-800"></div>
       <button id="notif-btn" class="relative text-gray-600 hover:text-blue-700">
         <i class="fas fa-bell text-xl"></i>
-        <?php if ($notifications->num_rows > 0): ?>
+        <?php if (!empty($notifications)): ?>
           <span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full animate-ping"></span>
           <span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full"></span>
         <?php endif; ?>
@@ -189,12 +185,15 @@ $availablePCs = $conn->query("
       <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-72 bg-white border rounded shadow-md z-50">
         <div class="p-3 font-semibold text-sm text-gray-700 border-b">Notifications</div>
         <ul class="max-h-64 overflow-y-auto text-sm">
-          <?php if ($notifications->num_rows > 0): ?>
-            <?php while ($notif = $notifications->fetch_assoc()): ?>
-              <li class="p-3 border-b hover:bg-gray-100"><?= htmlspecialchars($notif['message']) ?><br>
-                <small class="text-gray-500"><?= date('M d, h:i A', strtotime($notif['created_at'])) ?></small>
+          <?php if (!empty($notifications)): ?>
+            <?php foreach ($notifications as $notif): ?>
+              <li class="p-3 border-b hover:bg-gray-100">
+                <?= htmlspecialchars($notif['message']) ?><br>
+                <small class="text-gray-500">
+                  <?= date('M d, h:i A', strtotime($notif['created_at'])) ?>
+                </small>
               </li>
-            <?php endwhile; ?>
+            <?php endforeach; ?>
           <?php else: ?>
             <li class="p-3 text-gray-500">No notifications</li>
           <?php endif; ?>
