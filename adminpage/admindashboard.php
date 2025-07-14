@@ -1,53 +1,89 @@
 <?php
 session_start();
 if (!isset($_SESSION['admin'])) {
-  header("Location: login.php");
-  exit();
+    header("Location: adminlogin.php");
+    exit();
 }
 require_once '../includes/db.php';
-if (isset($_POST['reservation_action'])) {
-  $res_id = $_POST['res_id'];
-  $action = $_POST['reservation_action'];
 
-  // Fetch reservation info
-  $stmt = $conn->prepare("SELECT pc_id, student_id FROM pc_reservations WHERE id = ? AND status = 'reserved'");
-  $stmt->bind_param("i", $res_id);
-  $stmt->execute();
-  $res = $stmt->get_result()->fetch_assoc();
+// ==== RESERVATION ACTION HANDLER ====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'], $_POST['res_id'])) {
+    $res_id = intval($_POST['res_id']);
+    $action = $_POST['reservation_action'];
+    $reason = $_POST['reason'] ?? null;
 
-  if ($res) {
-    $pc_id = $res['pc_id'];
-    $student_id = $res['student_id'];
+    // Fetch reservation info
+    $stmt = $conn->prepare("SELECT pc_id, student_id FROM pc_reservations WHERE id = ?");
+    $stmt->bind_param("i", $res_id);
+    $stmt->execute();
+    $res = $stmt->get_result()->fetch_assoc();
 
-    if ($action === 'approve') {
-      // 1. Set PC status to in_use
-      $conn->query("UPDATE pcs SET status = 'in_use' WHERE id = $pc_id");
+    if ($res) {
+        $pc_id = $res['pc_id'];
+        $student_id = $res['student_id'];
+        $msg = "";
 
-      // 2. Insert to lab_sessions
-      $conn->query("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', $student_id, $pc_id, 'active', NOW())");
+        if ($action === 'approve') {
+            // Approve Reservation
+            $conn->query("UPDATE pcs SET status = 'in_use' WHERE id = $pc_id");
+            $conn->query("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', $student_id, $pc_id, 'active', NOW())");
+            $conn->query("UPDATE pc_reservations SET status = 'approved', reason = NULL, updated_at = NOW() WHERE id = $res_id");
+            $msg = "✅ Your PC reservation (PC #$pc_id) has been approved.";
+        }
+        elseif ($action === 'reject') {
+            // Reject Reservation
+            $conn->query("UPDATE pc_reservations SET status = 'rejected', reason = '".addslashes($reason)."', updated_at = NOW() WHERE id = $res_id");
+            $msg = "❌ Your PC reservation (PC #$pc_id) was rejected by the admin." . ($reason ? " Reason: $reason" : "");
+        }
+        elseif ($action === 'cancel') {
+            // Cancel Reservation
+            $conn->query("UPDATE pc_reservations SET status = 'cancelled', reason = '".addslashes($reason)."', updated_at = NOW() WHERE id = $res_id");
+            $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled by the admin." . ($reason ? " Reason: $reason" : "");
+        }
+        elseif ($action === 'completed') {
+            // Complete Reservation
+            $conn->query("UPDATE pc_reservations SET status = 'completed', updated_at = NOW() WHERE id = $res_id");
+            $msg = "✅ Your PC reservation (PC #$pc_id) has been marked as completed by the admin.";
+        }
 
-      // 3. Update reservation status
-      $conn->query("UPDATE pc_reservations SET status = 'approved' WHERE id = $res_id");
-
-      // 4. Notify student
-      $msg = "✅ Your PC reservation (PC #$pc_id) has been approved.";
-      $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
-      $notif_stmt->bind_param("is", $student_id, $msg);
-      $notif_stmt->execute();
-
-    } elseif ($action === 'cancel') {
-      $conn->query("UPDATE pc_reservations SET status = 'cancelled' WHERE id = $res_id");
-
-      $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled by the admin.";
-      $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
-      $notif_stmt->bind_param("is", $student_id, $msg);
-      $notif_stmt->execute();
+        // Notify student if needed
+        if ($msg) {
+            $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
+            $notif_stmt->bind_param("is", $student_id, $msg);
+            $notif_stmt->execute();
+        }
     }
-  }
-  header("Location: admin_dashboard.php#reservations");
-  exit();
+
+    header("Location: admindashboard.php#reservations");
+    exit();
 }
-// Summary Cards
+
+// ==== MAINTENANCE STATUS UPDATE HANDLER ====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['maint_action'], $_POST['maint_id'])) {
+    $mid = intval($_POST['maint_id']);
+    $action = $_POST['maint_action'];
+    $allowed = ['in_progress', 'completed', 'rejected', 'resolved'];
+
+    if (in_array($action, $allowed)) {
+        $updateStmt = $conn->prepare("UPDATE maintenance_requests SET status = ?, updated_at = NOW() WHERE id = ?");
+        $updateStmt->bind_param("si", $action, $mid);
+        $updateStmt->execute();
+
+        // OPTIONAL: Notify student if student_id exists for maintenance request
+        $userInfo = $conn->query("SELECT student_id, pc_id FROM maintenance_requests WHERE id = $mid")->fetch_assoc();
+        if ($userInfo && $userInfo['student_id']) {
+            $pc_id = $userInfo['pc_id'];
+            $msg = "🔧 Your maintenance request for PC #$pc_id has been updated to: " . ucfirst(str_replace('_', ' ', $action));
+            $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
+            $notif_stmt->bind_param("is", $userInfo['student_id'], $msg);
+            $notif_stmt->execute();
+        }
+    }
+    header("Location: admindashboard.php#maintenance");
+    exit();
+}
+
+// ==== DASHBOARD DATA (SUMMARY CARDS) ====
 $totalPCs = $conn->query("SELECT COUNT(*) AS total FROM pcs")->fetch_assoc()['total'] ?? 40;
 $pcUsed = $conn->query("SELECT COUNT(*) AS used FROM lab_sessions WHERE status = 'active'")->fetch_assoc()['used'] ?? 0;
 $pendingMaintenance = $conn->query("SELECT COUNT(*) AS pending FROM maintenance_requests WHERE status = 'pending'")->fetch_assoc()['pending'] ?? 0;
@@ -56,19 +92,19 @@ $totalStudents = $conn->query("SELECT COUNT(*) AS count FROM students")->fetch_a
 $totalFaculty = $conn->query("SELECT COUNT(*) AS count FROM faculty")->fetch_assoc()['count'] ?? 0;
 $totalReservations = $conn->query("SELECT COUNT(*) AS total FROM pc_reservations WHERE status = 'reserved'")->fetch_assoc()['total'] ?? 0;
 
-// Activities
+// ==== RECENT ACTIVITIES ====
 $recentActivities = $conn->query("SELECT action, user, pc_no, timestamp FROM lab_activities ORDER BY timestamp DESC LIMIT 5");
 
-// Reservations
+// ==== RESERVATIONS TABLE (show all relevant statuses and reason) ====
 $reservations = $conn->query("
-  SELECT r.id, s.fullname, p.pc_name, r.reservation_time, r.status 
+  SELECT r.id, s.fullname, p.pc_name, r.reservation_time, r.status, r.reason
   FROM pc_reservations r
   JOIN students s ON r.student_id = s.id
   JOIN pcs p ON r.pc_id = p.id
-  ORDER BY r.reservation_time DESC LIMIT 10
+  ORDER BY r.reservation_time DESC LIMIT 30
 ");
 
-// UserLogs
+// ==== USER LOGS ====
 $userLogs = $conn->query("
   SELECT u.fullname, l.action, l.pc_no, l.timestamp 
   FROM user_logs l 
@@ -76,7 +112,7 @@ $userLogs = $conn->query("
   ORDER BY l.timestamp DESC LIMIT 50
 ");
 
-// Student Requests
+// ==== STUDENT REQUESTS ====
 $studentRequests = $conn->query("
   SELECT r.id, s.fullname, r.subject, r.message, r.status, r.created_at
   FROM student_requests r
@@ -84,23 +120,27 @@ $studentRequests = $conn->query("
   ORDER BY r.created_at DESC
 ");
 
-// Reports Section
-$reports = $conn->query("SELECT r.id, r.report_type, r.details, r.created_at, s.fullname AS student
-                          FROM reports r
-                          LEFT JOIN students s ON r.student_id = s.id
-                          ORDER BY r.created_at DESC");
+// ==== REPORTS ====
+$reports = $conn->query("
+  SELECT r.id, r.report_type, r.details, r.created_at, s.fullname AS student
+  FROM reports r
+  LEFT JOIN students s ON r.student_id = s.id
+  ORDER BY r.created_at DESC
+");
 
-// Maintenance Section
-$maintenanceList = $conn->query("SELECT m.id, m.pc_id, p.pc_name, m.issue, m.status, m.created_at
-                                  FROM maintenance_requests m
-                                  JOIN pcs p ON m.pc_id = p.id
-                                  ORDER BY m.created_at DESC");
+// ==== MAINTENANCE REQUESTS ====
+$maintenanceList = $conn->query("
+  SELECT m.id, m.pc_id, m.student_id, p.pc_name, m.issue, m.status, m.created_at, m.updated_at
+  FROM maintenance_requests m
+  JOIN pcs p ON m.pc_id = p.id
+  ORDER BY m.created_at DESC
+");
 
-// Settings Section (Placeholder)
+// ==== LAB SETTINGS ====
 $labSettingsResult = $conn->query("SELECT * FROM lab_settings LIMIT 1");
 $labSettings = $labSettingsResult->fetch_assoc();
 
-// Notifications
+// ==== NOTIFICATIONS FOR ADMIN ====
 $notifications_sql = "
   SELECT n.message, n.created_at, s.fullname
   FROM notifications n
@@ -108,9 +148,9 @@ $notifications_sql = "
   WHERE n.recipient_type = 'admin'
   ORDER BY n.created_at DESC
 ";
-
 $notifications = $conn->query($notifications_sql);
 $newNotiCount = $notifications->num_rows ?? 0;
+
 ?>
 
 <!DOCTYPE html>
@@ -268,9 +308,9 @@ $newNotiCount = $notifications->num_rows ?? 0;
     </section>
     
 <section id="reservations" class="section">
-  <h3 class="text-lg font-semibold mb-4">Latest PC Reservations</h3>
+  <h3 class="text-lg font-semibold mb-4">PC Reservations</h3>
   <div class="flex justify-between items-center mb-3">
-    <input type="text" id="resSearch" placeholder="Search..." class="border px-2 py-1 rounded w-1/2">
+    <input type="text" id="resSearch" placeholder="Search by student, PC, or status..." class="border px-2 py-1 rounded w-1/2">
     <a href="export_reservations.php" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
       <i class="fas fa-file-csv"></i> Export CSV
     </a>
@@ -280,22 +320,65 @@ $newNotiCount = $notifications->num_rows ?? 0;
       <tr>
         <th class="px-4 py-2 text-left">Student</th>
         <th class="px-4 py-2 text-left">PC</th>
-        <th class="px-4 py-2 text-left">Time</th>
+        <th class="px-4 py-2 text-left">Reservation Date</th>
+        <th class="px-4 py-2 text-left">Requested At</th>
         <th class="px-4 py-2 text-left">Status</th>
+        <th class="px-4 py-2 text-left">Reason</th>
         <th class="px-4 py-2 text-left">Actions</th>
       </tr>
     </thead>
     <tbody>
-      <?php while($r = $reservations->fetch_assoc()): ?>
-        <tr class="border-t border-gray-300 dark:border-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name']) ?>">
+      <?php
+      // Fetch ALL recent reservations (with more statuses)
+      $reservations = $conn->query("
+        SELECT r.id, s.fullname, p.pc_name, r.reservation_date, r.reservation_time, r.status, r.reason
+        FROM pc_reservations r
+        JOIN students s ON r.student_id = s.id
+        JOIN pcs p ON r.pc_id = p.id
+        ORDER BY r.reservation_time DESC LIMIT 30
+      ");
+      while($r = $reservations->fetch_assoc()):
+        $status = strtolower($r['status']);
+        $badge = match($status) {
+          'pending'   => 'bg-yellow-200 text-yellow-800',
+          'reserved'  => 'bg-blue-200 text-blue-800',
+          'approved'  => 'bg-green-200 text-green-800',
+          'cancelled' => 'bg-red-200 text-red-800',
+          'rejected'  => 'bg-red-200 text-red-800',
+          'expired'   => 'bg-gray-200 text-gray-700',
+          'completed' => 'bg-gray-300 text-gray-900',
+          default     => 'bg-gray-200 text-gray-700'
+        };
+      ?>
+        <tr class="border-t border-gray-300 dark:border-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name'] . ' ' . $r['status']) ?>">
           <td class="px-4 py-2"><?= htmlspecialchars($r['fullname']) ?></td>
           <td class="px-4 py-2"><?= htmlspecialchars($r['pc_name']) ?></td>
+          <td class="px-4 py-2"><?= $r['reservation_date'] ? date('M d, Y', strtotime($r['reservation_date'])) : '<span class="text-gray-400">—</span>' ?></td>
           <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($r['reservation_time'])) ?></td>
-          <td class="px-4 py-2 status"><?= ucfirst($r['status']) ?></td>
           <td class="px-4 py-2">
-            <?php if (in_array($r['status'], ['reserved', 'pending'])): ?>
-              <button data-id="<?= $r['id'] ?>" data-action="approve" class="res-action bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
-              <button data-id="<?= $r['id'] ?>" data-action="cancel" class="res-action bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700">Cancel</button>
+            <span class="px-2 py-1 rounded <?= $badge ?> capitalize"><?= ucfirst($status) ?></span>
+          </td>
+          <td class="px-4 py-2"><?= $r['reason'] ? htmlspecialchars($r['reason']) : '<span class="text-gray-400">—</span>' ?></td>
+          <td class="px-4 py-2">
+            <?php if ($status === 'pending'): ?>
+              <form method="POST" class="inline">
+                <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
+                <button name="reservation_action" value="reject" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
+                        onclick="return promptReason(this)">Reject</button>
+              </form>
+            <?php elseif ($status === 'reserved'): ?>
+              <form method="POST" class="inline">
+                <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
+                <button name="reservation_action" value="cancel" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
+                        onclick="return promptReason(this)">Cancel</button>
+              </form>
+            <?php elseif ($status === 'approved'): ?>
+              <form method="POST" class="inline">
+                <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                <button name="reservation_action" value="completed" class="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">Mark Completed</button>
+              </form>
             <?php else: ?>
               <span class="text-gray-400 italic">N/A</span>
             <?php endif; ?>
@@ -427,33 +510,74 @@ $newNotiCount = $notifications->num_rows ?? 0;
     </section>
 
     <!-- ==== MAINTENANCE SECTION ==== -->
-    <section id="maintenance" class="section">
-      <h3 class="text-lg font-semibold mb-4">PC Maintenance Requests</h3>
-      <?php if ($maintenanceList->num_rows > 0): ?>
-        <table class="w-full text-sm border border-gray-300 dark:border-gray-700">
-          <thead class="bg-gray-200 dark:bg-gray-800">
-            <tr>
-              <th class="px-4 py-2 text-left">PC Name</th>
-              <th class="px-4 py-2 text-left">Issue</th>
-              <th class="px-4 py-2 text-left">Status</th>
-              <th class="px-4 py-2 text-left">Reported At</th>
+<section id="maintenance" class="section">
+  <h3 class="text-lg font-semibold mb-4">PC Maintenance Requests</h3>
+  <div class="flex items-center mb-4 gap-4">
+    <input type="text" id="maintSearch" placeholder="Search by PC or Issue..." class="border px-2 py-1 rounded w-1/2">
+    <a href="export_maintenance.php" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+      <i class="fas fa-file-csv"></i> Export CSV
+    </a>
+  </div>
+  <?php if ($maintenanceList->num_rows > 0): ?>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border border-gray-300 dark:border-gray-700" id="maintTable">
+        <thead class="bg-gray-200 dark:bg-gray-800">
+          <tr>
+            <th class="px-4 py-2 text-left">PC Name</th>
+            <th class="px-4 py-2 text-left">Issue</th>
+            <th class="px-4 py-2 text-left">Status</th>
+            <th class="px-4 py-2 text-left">Reported At</th>
+            <th class="px-4 py-2 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php while ($m = $maintenanceList->fetch_assoc()): ?>
+            <tr class="border-t border-gray-300 dark:border-gray-700" data-maint="<?= strtolower($m['pc_name'].' '.$m['issue'].' '.$m['status']) ?>">
+              <td class="px-4 py-2"><?= htmlspecialchars($m['pc_name']) ?></td>
+              <td class="px-4 py-2"><?= htmlspecialchars($m['issue']) ?></td>
+              <td class="px-4 py-2">
+                <?php
+                  $status = strtolower($m['status']);
+                  $badge = match($status) {
+                    'pending' => 'bg-yellow-200 text-yellow-800',
+                    'in_progress' => 'bg-blue-200 text-blue-800',
+                    'completed' => 'bg-green-200 text-green-800',
+                    'rejected' => 'bg-red-200 text-red-800',
+                    default => 'bg-gray-200 text-gray-700'
+                  };
+                  echo "<span class='px-2 py-1 rounded $badge capitalize'>$status</span>";
+                ?>
+              </td>
+              <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($m['created_at'])) ?></td>
+              <td class="px-4 py-2">
+                <?php if (in_array($status, ['pending','in_progress'])): ?>
+                  <form method="POST" class="inline">
+                    <input type="hidden" name="maint_id" value="<?= $m['id'] ?>">
+                    <?php if ($status == 'pending'): ?>
+                      <button name="maint_action" value="in_progress"
+                        class="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 mr-1">Mark In Progress</button>
+                      <button name="maint_action" value="rejected"
+                        class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700">Reject</button>
+                    <?php endif; ?>
+                    <?php if ($status == 'in_progress'): ?>
+                      <button name="maint_action" value="completed"
+                        class="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">Mark Completed</button>
+                    <?php endif; ?>
+                  </form>
+                <?php else: ?>
+                  <span class="italic text-gray-400">—</span>
+                <?php endif; ?>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            <?php while ($m = $maintenanceList->fetch_assoc()): ?>
-              <tr class="border-t border-gray-300 dark:border-gray-700">
-                <td class="px-4 py-2"><?= htmlspecialchars($m['pc_name']) ?></td>
-                <td class="px-4 py-2"><?= htmlspecialchars($m['issue']) ?></td>
-                <td class="px-4 py-2"><?= ucfirst($m['status']) ?></td>
-                <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($m['created_at'])) ?></td>
-              </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
-      <?php else: ?>
-        <p class="text-gray-600 dark:text-gray-400">No maintenance records.</p>
-      <?php endif; ?>
-    </section>
+          <?php endwhile; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php else: ?>
+    <p class="text-gray-600 dark:text-gray-400">No maintenance records.</p>
+  <?php endif; ?>
+</section>
+
 
     <!-- ==== LAB SETTINGS SECTION ==== -->
     <section id="settings" class="section">
@@ -626,4 +750,37 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+// Maintenance Table Search
+const maintSearch = document.getElementById('maintSearch');
+if (maintSearch) {
+  maintSearch.addEventListener('input', function () {
+    const term = this.value.toLowerCase();
+    document.querySelectorAll('#maintTable tbody tr').forEach(row => {
+      row.style.display = row.dataset.maint.includes(term) ? '' : 'none';
+    });
+  });
+}
+// Reservation Search Filter
+const resSearch = document.getElementById('resSearch');
+if (resSearch) {
+  resSearch.addEventListener('input', function () {
+    const term = this.value.toLowerCase();
+    document.querySelectorAll('#resTable tbody tr').forEach(row => {
+      row.style.display = row.dataset.row.includes(term) ? '' : 'none';
+    });
+  });
+}
+
+// Prompt for reason before reject/cancel
+function promptReason(btn) {
+  const reason = prompt('Please provide a reason for this action (it will be sent to the student):');
+  if (!reason) return false;
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'reason';
+  input.value = reason;
+  btn.form.appendChild(input);
+  return true;
+}
+
 </script>

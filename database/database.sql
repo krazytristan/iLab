@@ -1,5 +1,5 @@
 -- =========================
--- iLab System Database Setup (Updated)
+-- iLab System Database Setup (Final, July 2025)
 -- =========================
 
 CREATE DATABASE IF NOT EXISTS ilab_system;
@@ -115,10 +115,13 @@ CREATE TABLE lab_sessions (
 CREATE TABLE maintenance_requests (
   id INT AUTO_INCREMENT PRIMARY KEY,
   pc_id INT NOT NULL,
+  student_id INT DEFAULT NULL,
   issue TEXT NOT NULL,
-  status ENUM('pending', 'resolved') DEFAULT 'pending',
+  status ENUM('pending', 'in_progress', 'completed', 'rejected', 'resolved') DEFAULT 'pending',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE,
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
 );
 
 -- ========== LAB ACTIVITIES ==========
@@ -159,13 +162,30 @@ CREATE TABLE pc_reservations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
   pc_id INT NOT NULL,
-  reservation_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reservation_date DATE NOT NULL,   -- The date the student wants to reserve the PC
+
+  -- Reservation start and end time
+  time_start TIME NOT NULL,         -- New: Start time for reservation
+  time_end TIME NOT NULL,           -- New: End time for reservation
+
+  reservation_time DATETIME DEFAULT CURRENT_TIMESTAMP, -- When the reservation request was made
   expires_at DATETIME DEFAULT NULL,
-  status ENUM('pending', 'reserved', 'cancelled') DEFAULT 'pending',
+  status ENUM(
+      'pending',      -- Student requested, awaiting admin action
+      'reserved',     -- Admin queued/held
+      'approved',     -- Admin approved
+      'cancelled',    -- Cancelled by admin/student
+      'rejected',     -- Explicitly rejected by admin
+      'expired',      -- Reservation time expired
+      'completed'     -- Session finished
+  ) DEFAULT 'pending',
+  reason TEXT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
   FOREIGN KEY (pc_id) REFERENCES pcs(id) ON DELETE CASCADE
 );
+
 
 -- ========== ATTENDANCE LOGS ==========
 CREATE TABLE attendance_logs (
@@ -238,6 +258,17 @@ CREATE TABLE lab_settings (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- ========== PASSWORD RESETS ==========
+DROP TABLE IF EXISTS password_resets;
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  token VARCHAR(255) NOT NULL UNIQUE,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES students(id) ON DELETE CASCADE
+);
+
 -- ========== Insert Default Lab Settings ==========
 INSERT INTO lab_settings (lab_name, default_session_length, max_reservations)
 VALUES ('iLab Computer Center', '1 hour', 3);
@@ -261,3 +292,4 @@ SELECT CONCAT('InternetLab-PC-', LPAD(n, 2, '0')), 3 FROM (SELECT 1 AS n UNION A
 
 INSERT INTO pcs (pc_name, lab_id)
 SELECT CONCAT('MacLab-PC-', LPAD(n, 2, '0')), 4 FROM (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18 UNION ALL SELECT 19 UNION ALL SELECT 20) AS numbers;
+

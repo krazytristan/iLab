@@ -1,90 +1,153 @@
+// studentdashboard.js
+
+// Digital Clock (real-time)
+function updateClock() {
+  const now = new Date();
+  const clock = document.getElementById("clock");
+  if (clock) clock.textContent = now.toLocaleTimeString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
 document.addEventListener("DOMContentLoaded", () => {
-  const dateEl = document.getElementById("date");
-  const today = new Date();
-  dateEl.textContent = today.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const sidebar = document.querySelector(".sidebar");
-  const hamburger = document.getElementById("hamburger");
-  const overlay = document.getElementById("overlay");
-  const header = document.querySelector(".main-header");
-  const menuLinks = document.querySelectorAll(".menu a");
+  // Sidebar & Navigation
+  const navLinks = document.querySelectorAll(".nav-link");
   const sections = document.querySelectorAll(".section");
-  const body = document.body;
-
-  // Toggle sidebar and overlay
-  function toggleSidebar(show) {
-    sidebar.classList.toggle("show", show);
-    overlay.classList.toggle("show", show);
-    body.classList.toggle("overlay-active", show);
-  }
-
-  // Hamburger click
-  hamburger.addEventListener("click", () => {
-    const isVisible = sidebar.classList.contains("show");
-    toggleSidebar(!isVisible);
-  });
-
-  // Overlay click closes sidebar
-  overlay.addEventListener("click", () => {
-    toggleSidebar(false);
-  });
-
-  // ESC key closes sidebar
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      toggleSidebar(false);
-    }
-  });
-
-  // Section switching
-  menuLinks.forEach((link) => {
-    link.addEventListener("click", (e) => {
+  navLinks.forEach(link => {
+    link.addEventListener("click", e => {
       e.preventDefault();
-      const target = link.getAttribute("data-link");
+      const target = link.dataset.target;
+      sections.forEach(sec => sec.classList.add("hidden"));
+      document.getElementById(target)?.classList.remove("hidden");
+      navLinks.forEach(l => l.classList.remove("bg-blue-900", "font-bold"));
+      link.classList.add("bg-blue-900", "font-bold");
+    });
+  });
 
-      // Save current section to localStorage
-      localStorage.setItem("activeSection", target);
-
-      // Update active menu link
-      menuLinks.forEach((l) => l.classList.remove("active"));
-      link.classList.add("active");
-
-      // Show the selected section
-      sections.forEach((section) => {
-        section.classList.remove("active");
-        if (section.id === target) {
-          section.classList.add("active");
-        }
-      });
-
-      // Close sidebar on mobile
-      if (window.innerWidth <= 768) {
-        toggleSidebar(false);
+  // Sidebar mobile toggle
+  const toggleSidebar = document.getElementById("toggleSidebar");
+  const sidebar = document.getElementById("sidebar");
+  toggleSidebar?.addEventListener("click", () => {
+    sidebar.classList.toggle("-translate-x-full");
+  });
+  navLinks.forEach(link => {
+    link.addEventListener("click", () => {
+      if (window.innerWidth < 768) {
+        sidebar.classList.add("-translate-x-full");
       }
     });
   });
 
-  // Restore last active section
-  const savedSection = localStorage.getItem("activeSection");
-  if (savedSection) {
-    const savedLink = document.querySelector(`.menu a[data-link="${savedSection}"]`);
-    if (savedLink) savedLink.click();
-  }
+  // Flash message timeout
+  const flash = document.getElementById("flash-message");
+  if (flash) setTimeout(() => flash.style.display = 'none', 5000);
 
-  // Auto-hide header on scroll
-  let lastScroll = 0;
-  window.addEventListener("scroll", () => {
-    const current = window.pageYOffset;
-    if (current > lastScroll) {
-      header.classList.add("hidden");
-    } else {
-      header.classList.remove("hidden");
-    }
-    lastScroll = current <= 0 ? 0 : current;
+  // Notification dropdown
+  const notifBtn = document.getElementById("notif-btn");
+  const notifDropdown = document.getElementById("notif-dropdown");
+  notifBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    notifDropdown.classList.toggle("hidden");
   });
+  document.addEventListener("click", (e) => {
+    if (
+      notifDropdown && notifBtn &&
+      !notifBtn.contains(e.target) &&
+      !notifDropdown.contains(e.target)
+    ) {
+      notifDropdown.classList.add("hidden");
+    }
+  });
+
+  // Modal (Lab PCs)
+  const modal = document.getElementById("pcModal");
+  const closeModal = document.getElementById("closeModal");
+  closeModal?.addEventListener("click", () => modal.classList.add("hidden"));
+  modal?.addEventListener("click", e => {
+    if (e.target === modal) modal.classList.add("hidden");
+  });
+});
+// reservepc.js
+
+// Make sure groupedPCs and reservedDatesPerPC are loaded as global variables from PHP
+
+document.addEventListener("DOMContentLoaded", () => {
+  const pcBoxes = document.getElementById("pc-boxes");
+  const labSelect = document.getElementById("lab-select");
+  const reservePcId = document.getElementById("reserve_pc_id");
+  const reservationDate = document.getElementById("reservation_date");
+  const timeStart = document.getElementById("reservation_time_start");
+  const timeEnd = document.getElementById("reservation_time_end");
+  const dateWarning = document.getElementById("date-warning");
+  let selectedPC = null;
+
+  if (labSelect) {
+    labSelect.addEventListener("change", () => {
+      const lab = labSelect.value;
+      pcBoxes.innerHTML = "";
+      reservePcId.value = "";
+      reservationDate.value = "";
+      reservationDate.setAttribute("disabled", "disabled");
+      timeStart.value = "";
+      timeEnd.value = "";
+      timeStart.setAttribute("disabled", "disabled");
+      timeEnd.setAttribute("disabled", "disabled");
+      dateWarning.classList.add("hidden");
+
+      if (!lab || !window.groupedPCs[lab] || window.groupedPCs[lab].length === 0) {
+        pcBoxes.classList.add("hidden");
+        return;
+      }
+      pcBoxes.classList.remove("hidden");
+
+      window.groupedPCs[lab].forEach(pc => {
+        const box = document.createElement("div");
+        box.setAttribute("data-pcid", pc.id);
+        box.className = `cursor-pointer p-2 text-center text-xs rounded font-semibold ${
+          pc.status === 'available'
+            ? 'bg-green-100 text-green-800'
+            : pc.status === 'in_use'
+            ? 'bg-yellow-100 text-yellow-800'
+            : 'bg-red-100 text-red-800'
+        }`;
+        box.textContent = pc.pc_name;
+        if (pc.status === 'available') {
+          box.addEventListener("click", () => {
+            reservePcId.value = pc.id;
+            document.querySelectorAll("#pc-boxes div").forEach(el =>
+              el.classList.remove("ring", "ring-2", "ring-blue-600")
+            );
+            box.classList.add("ring", "ring-2", "ring-blue-600");
+            reservationDate.removeAttribute("disabled");
+            timeStart.removeAttribute("disabled");
+            timeEnd.removeAttribute("disabled");
+            selectedPC = pc.id;
+            // Reserved date logic
+            const reservedDates = (window.reservedDatesPerPC && window.reservedDatesPerPC[selectedPC]) || [];
+            reservationDate.oninput = function () {
+              if (reservedDates.includes(this.value)) {
+                dateWarning.textContent = "That date is already reserved for this PC.";
+                dateWarning.classList.remove("hidden");
+                this.value = "";
+              } else {
+                dateWarning.classList.add("hidden");
+              }
+            };
+          });
+        }
+        pcBoxes.appendChild(box);
+      });
+    });
+  }
+  if (labSelect) {
+    labSelect.addEventListener("change", () => {
+      reservationDate.value = "";
+      timeStart.value = "";
+      timeEnd.value = "";
+      reservationDate.setAttribute("disabled", "disabled");
+      timeStart.setAttribute("disabled", "disabled");
+      timeEnd.setAttribute("disabled", "disabled");
+      dateWarning.classList.add("hidden");
+    });
+  }
 });

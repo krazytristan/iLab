@@ -1,0 +1,23 @@
+/* iLab Auth Forms Base Styles */
+body.user-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: #f3f4f6;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+}
+form {
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+.alert {
+  color: #b91c1c;
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+}

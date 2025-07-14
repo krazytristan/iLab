@@ -1,5 +1,5 @@
 <?php
-require_once '../adminpage/db.php'; // Adjust if necessary
+require_once '../includes/db.php'; // Adjust if necessary
 session_start();
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {

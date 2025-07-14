@@ -168,3 +168,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+// Reservation Search Filter
+const resSearch = document.getElementById('resSearch');
+if (resSearch) {
+  resSearch.addEventListener('input', function () {
+    const term = this.value.toLowerCase();
+    document.querySelectorAll('#resTable tbody tr').forEach(row => {
+      row.style.display = row.dataset.row.includes(term) ? '' : 'none';
+    });
+  });
+}
+
+// Prompt for reason before reject/cancel
+function promptReason(btn) {
+  const reason = prompt('Please provide a reason for this action (it will be sent to the student):');
+  if (!reason) return false;
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'reason';
+  input.value = reason;
+  btn.form.appendChild(input);
+  return true;
+}
