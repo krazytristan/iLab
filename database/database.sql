@@ -204,9 +204,11 @@ CREATE TABLE notifications (
   recipient_type ENUM('student', 'admin') NOT NULL,
   recipient_id INT NOT NULL,
   message TEXT NOT NULL,
-  is_read BOOLEAN DEFAULT FALSE,
+  read_at DATETIME DEFAULT NULL,           -- NULL means unread, set timestamp when read
+  is_read BOOLEAN GENERATED ALWAYS AS (read_at IS NOT NULL) STORED, -- Virtual column for easier queries
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_recipient (recipient_type, recipient_id)
+  INDEX idx_recipient (recipient_type, recipient_id),
+  INDEX idx_unread (recipient_type, recipient_id, is_read)
 );
 
 -- ========== FEEDBACK ==========
