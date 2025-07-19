@@ -1,5 +1,3 @@
-// studentdashboard.js
-
 // Digital Clock (real-time)
 function updateClock() {
   const now = new Date();
@@ -9,12 +7,12 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", function() {
   // Sidebar & Navigation
   const navLinks = document.querySelectorAll(".nav-link");
   const sections = document.querySelectorAll(".section");
   navLinks.forEach(link => {
-    link.addEventListener("click", e => {
+    link.addEventListener("click", function(e) {
       e.preventDefault();
       const target = link.dataset.target;
       sections.forEach(sec => sec.classList.add("hidden"));
@@ -27,11 +25,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // Sidebar mobile toggle
   const toggleSidebar = document.getElementById("toggleSidebar");
   const sidebar = document.getElementById("sidebar");
-  toggleSidebar?.addEventListener("click", () => {
-    sidebar.classList.toggle("-translate-x-full");
-  });
+  if (toggleSidebar) {
+    toggleSidebar.addEventListener("click", function() {
+      sidebar.classList.toggle("-translate-x-full");
+    });
+  }
   navLinks.forEach(link => {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", function() {
       if (window.innerWidth < 768) {
         sidebar.classList.add("-translate-x-full");
       }
@@ -45,109 +45,136 @@ document.addEventListener("DOMContentLoaded", () => {
   // Notification dropdown
   const notifBtn = document.getElementById("notif-btn");
   const notifDropdown = document.getElementById("notif-dropdown");
-  notifBtn?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    notifDropdown.classList.toggle("hidden");
-  });
-  document.addEventListener("click", (e) => {
-    if (
-      notifDropdown && notifBtn &&
-      !notifBtn.contains(e.target) &&
-      !notifDropdown.contains(e.target)
-    ) {
-      notifDropdown.classList.add("hidden");
-    }
-  });
+  if (notifBtn && notifDropdown) {
+    notifBtn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      notifDropdown.classList.toggle("hidden");
+    });
+    document.addEventListener("click", function(e) {
+      if (
+        notifDropdown && notifBtn &&
+        !notifBtn.contains(e.target) &&
+        !notifDropdown.contains(e.target)
+      ) {
+        notifDropdown.classList.add("hidden");
+      }
+    });
+  }
 
   // Modal (Lab PCs)
   const modal = document.getElementById("pcModal");
   const closeModal = document.getElementById("closeModal");
-  closeModal?.addEventListener("click", () => modal.classList.add("hidden"));
-  modal?.addEventListener("click", e => {
-    if (e.target === modal) modal.classList.add("hidden");
-  });
-});
-// reservepc.js
+  if (closeModal && modal) {
+    closeModal.addEventListener("click", () => modal.classList.add("hidden"));
+    modal.addEventListener("click", e => {
+      if (e.target === modal) modal.classList.add("hidden");
+    });
+  }
 
-// Make sure groupedPCs and reservedDatesPerPC are loaded as global variables from PHP
-
-document.addEventListener("DOMContentLoaded", () => {
-  const pcBoxes = document.getElementById("pc-boxes");
+  // ================== RESERVATION SECTION ==================
+  // Ensure window.groupedPCs, window.reservedSlots are available!
   const labSelect = document.getElementById("lab-select");
+  const pcBoxes = document.getElementById("pc-boxes");
   const reservePcId = document.getElementById("reserve_pc_id");
   const reservationDate = document.getElementById("reservation_date");
   const timeStart = document.getElementById("reservation_time_start");
   const timeEnd = document.getElementById("reservation_time_end");
   const dateWarning = document.getElementById("date-warning");
-  let selectedPC = null;
 
-  if (labSelect) {
-    labSelect.addEventListener("change", () => {
-      const lab = labSelect.value;
-      pcBoxes.innerHTML = "";
-      reservePcId.value = "";
-      reservationDate.value = "";
-      reservationDate.setAttribute("disabled", "disabled");
-      timeStart.value = "";
-      timeEnd.value = "";
-      timeStart.setAttribute("disabled", "disabled");
-      timeEnd.setAttribute("disabled", "disabled");
-      dateWarning.classList.add("hidden");
-
-      if (!lab || !window.groupedPCs[lab] || window.groupedPCs[lab].length === 0) {
-        pcBoxes.classList.add("hidden");
-        return;
+  function isPCReserved(pcId, selectedDate, selectedStart, selectedEnd) {
+    if (!window.reservedSlots || !window.reservedSlots[pcId]) return false;
+    const slots = window.reservedSlots[pcId];
+    for (const slot of slots) {
+      if (slot.date === selectedDate) {
+        // If times are not selected, just block if any reservation exists
+        if (!selectedStart || !selectedEnd) return true;
+        // Time overlap logic: [A,B] overlaps [X,Y] iff A < Y && B > X
+        if (selectedStart < slot.end && selectedEnd > slot.start) return true;
       }
-      pcBoxes.classList.remove("hidden");
+    }
+    return false;
+  }
 
-      window.groupedPCs[lab].forEach(pc => {
-        const box = document.createElement("div");
-        box.setAttribute("data-pcid", pc.id);
-        box.className = `cursor-pointer p-2 text-center text-xs rounded font-semibold ${
-          pc.status === 'available'
-            ? 'bg-green-100 text-green-800'
-            : pc.status === 'in_use'
-            ? 'bg-yellow-100 text-yellow-800'
-            : 'bg-red-100 text-red-800'
-        }`;
-        box.textContent = pc.pc_name;
-        if (pc.status === 'available') {
-          box.addEventListener("click", () => {
-            reservePcId.value = pc.id;
-            document.querySelectorAll("#pc-boxes div").forEach(el =>
-              el.classList.remove("ring", "ring-2", "ring-blue-600")
-            );
-            box.classList.add("ring", "ring-2", "ring-blue-600");
-            reservationDate.removeAttribute("disabled");
-            timeStart.removeAttribute("disabled");
-            timeEnd.removeAttribute("disabled");
-            selectedPC = pc.id;
-            // Reserved date logic
-            const reservedDates = (window.reservedDatesPerPC && window.reservedDatesPerPC[selectedPC]) || [];
-            reservationDate.oninput = function () {
-              if (reservedDates.includes(this.value)) {
-                dateWarning.textContent = "That date is already reserved for this PC.";
-                dateWarning.classList.remove("hidden");
-                this.value = "";
-              } else {
-                dateWarning.classList.add("hidden");
-              }
-            };
-          });
-        }
-        pcBoxes.appendChild(box);
-      });
+  // Draw PC boxes according to current selections
+  function drawPCBoxes() {
+    if (!labSelect || !pcBoxes) return;
+    const lab = labSelect.value;
+    const pcs = window.groupedPCs?.[lab] || [];
+    const selectedDate = reservationDate.value;
+    const selectedStart = timeStart.value;
+    const selectedEnd = timeEnd.value;
+
+    pcBoxes.innerHTML = "";
+    pcBoxes.classList.toggle("hidden", pcs.length === 0);
+
+    pcs.forEach(pc => {
+      let unavailable = pc.status !== "available";
+      if (!unavailable && selectedDate && selectedStart && selectedEnd) {
+        unavailable = isPCReserved(pc.id, selectedDate, selectedStart, selectedEnd);
+      }
+      const div = document.createElement("div");
+      div.textContent = pc.pc_name;
+      div.dataset.pcId = pc.id;
+      div.className = `border p-2 rounded text-center text-xs font-semibold ${unavailable ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-100 text-green-800 cursor-pointer hover:bg-green-200"}`;
+      if (!unavailable) {
+        div.addEventListener("click", function() {
+          reservePcId.value = pc.id;
+          [...pcBoxes.children].forEach(c => c.classList.remove("ring-2", "ring-blue-600"));
+          div.classList.add("ring-2", "ring-blue-600");
+          reservationDate.disabled = false;
+          timeStart.disabled = false;
+          timeEnd.disabled = false;
+        });
+      } else {
+        div.style.pointerEvents = "none";
+      }
+      pcBoxes.appendChild(div);
     });
   }
+
   if (labSelect) {
-    labSelect.addEventListener("change", () => {
+    labSelect.addEventListener("change", function() {
       reservationDate.value = "";
       timeStart.value = "";
       timeEnd.value = "";
+      reservePcId.value = "";
       reservationDate.setAttribute("disabled", "disabled");
       timeStart.setAttribute("disabled", "disabled");
       timeEnd.setAttribute("disabled", "disabled");
       dateWarning.classList.add("hidden");
+      drawPCBoxes();
     });
   }
+
+  if (reservationDate) {
+    reservationDate.addEventListener("change", function() {
+      timeStart.value = "";
+      timeEnd.value = "";
+      reservePcId.value = "";
+      dateWarning.classList.add("hidden");
+      drawPCBoxes();
+      // Date check for all PCs: if all are reserved for this date, show warning
+      if (pcBoxes && pcBoxes.childNodes.length > 0) {
+        let allUnavailable = true;
+        pcBoxes.childNodes.forEach(div => {
+          if (!div.classList.contains("bg-gray-300")) allUnavailable = false;
+        });
+        if (allUnavailable) {
+          dateWarning.textContent = "No available PCs on this date.";
+          dateWarning.classList.remove("hidden");
+        }
+      }
+    });
+  }
+
+  [timeStart, timeEnd].forEach(inp => {
+    if (inp) {
+      inp.addEventListener("change", function() {
+        reservePcId.value = "";
+        dateWarning.classList.add("hidden");
+        drawPCBoxes();
+      });
+    }
+  });
+
 });

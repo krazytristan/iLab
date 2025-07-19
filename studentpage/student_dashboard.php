@@ -1,5 +1,4 @@
 <?php
-// student_dashboard.php
 require_once '../includes/db.php';
 session_start();
 
@@ -10,40 +9,93 @@ if (!isset($_SESSION['student_id'])) {
 
 $student_id = $_SESSION['student_id'];
 
-// Fetch student info
-$student_stmt = $conn->prepare("SELECT fullname, email FROM students WHERE id = ?");
-$student_stmt->bind_param("i", $student_id);
-$student_stmt->execute();
-$student = $student_stmt->get_result()->fetch_assoc();
-
+// Flash message
 $flash_message = $_SESSION['flash_message'] ?? '';
 unset($_SESSION['flash_message']);
 
-// Get all PCs
-$pcsData = [];
-$pcsResult = $conn->query("SELECT id, pc_name, status FROM pcs");
-while ($row = $pcsResult->fetch_assoc()) {
-  $pcsData[] = $row;
+// ============================
+// 1. Handle "Start Session" if student clicks the button
+// ============================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_session'])) {
+    $reservation_id = $_POST['start_reservation_id'];
+    $pc_id = $_POST['start_pc_id'];
+
+    // Double check reservation is still valid for now
+    $now_date = date('Y-m-d');
+    $now_time = date('H:i:s');
+    $check_stmt = $conn->prepare("
+        SELECT id FROM pc_reservations 
+        WHERE id = ? AND student_id = ? 
+          AND status = 'approved'
+          AND reservation_date = ?
+          AND ? BETWEEN time_start AND time_end
+        LIMIT 1
+    ");
+    $check_stmt->bind_param("iiss", $reservation_id, $student_id, $now_date, $now_time);
+    $check_stmt->execute();
+    $is_valid = $check_stmt->get_result()->fetch_assoc();
+
+    if ($is_valid) {
+        // 1. Insert active session
+        $stmt = $conn->prepare("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', ?, ?, 'active', NOW())");
+        $stmt->bind_param("ii", $student_id, $pc_id);
+        $stmt->execute();
+
+        // 2. Set PC to in_use
+        $stmt2 = $conn->prepare("UPDATE pcs SET status = 'in_use' WHERE id = ?");
+        $stmt2->bind_param("i", $pc_id);
+        $stmt2->execute();
+
+        // 3. Set reservation to 'reserved'
+        $stmt3 = $conn->prepare("UPDATE pc_reservations SET status = 'reserved' WHERE id = ?");
+        $stmt3->bind_param("i", $reservation_id);
+        $stmt3->execute();
+
+        $_SESSION['flash_message'] = "✅ Session started. Enjoy your reserved PC!";
+    } else {
+        $_SESSION['flash_message'] = "❌ Session could not be started. Please check your reservation time.";
+    }
+    header("Location: student_dashboard.php");
+    exit();
 }
 
-// Build $grouped_pcs for lab dropdown & section
-$grouped_pcs = [];
-foreach ($pcsData as $pc) {
-  preg_match('/^(.*?)-PC-(\d+)$/', $pc['pc_name'], $matches);
-  $labGroup = isset($matches[1]) && $matches[1] !== '' ? $matches[1] : 'Other';
-  $grouped_pcs[$labGroup][] = $pc;
-}
+// ============================
+// 2. Handle Time Out (ends session)
+// ============================
+if (isset($_POST['time_out'])) {
+  // 1. End the session
+  $timeout_stmt = $conn->prepare("UPDATE lab_sessions SET status = 'inactive', logout_time = NOW() WHERE user_type='student' AND user_id = ? AND status = 'active'");
+  $timeout_stmt->bind_param("i", $student_id);
+  $timeout_stmt->execute();
 
-// Get reserved dates for each PC (pending, reserved, approved, completed)
-$reservedDatesPerPC = [];
-$reservedDatesSQL = $conn->query("SELECT pc_id, reservation_date FROM pc_reservations WHERE status IN ('pending','reserved','approved','completed')");
-while ($row = $reservedDatesSQL->fetch_assoc()) {
-  if ($row['reservation_date']) {
-    $reservedDatesPerPC[$row['pc_id']][] = $row['reservation_date'];
+  // 2. Find the last PC used by this student (their latest session)
+  $find_pc = $conn->prepare("SELECT pc_id FROM lab_sessions WHERE user_type='student' AND user_id = ? ORDER BY login_time DESC LIMIT 1");
+  $find_pc->bind_param("i", $student_id);
+  $find_pc->execute();
+  $res = $find_pc->get_result()->fetch_assoc();
+
+  if ($res && isset($res['pc_id'])) {
+    $used_pc_id = $res['pc_id'];
+
+    // 3. Update the PC status back to available
+    $update_pc = $conn->prepare("UPDATE pcs SET status = 'available' WHERE id = ?");
+    $update_pc->bind_param("i", $used_pc_id);
+    $update_pc->execute();
+
+    // 4. OPTIONAL: Mark the corresponding reservation as completed
+    $update_res = $conn->prepare("UPDATE pc_reservations SET status = 'completed' WHERE pc_id = ? AND student_id = ? AND status IN ('approved', 'reserved')");
+    $update_res->bind_param("ii", $used_pc_id, $student_id);
+    $update_res->execute();
   }
+
+  $_SESSION['flash_message'] = "✅ You have logged out from the session.";
+  header("Location: student_dashboard.php");
+  exit();
 }
 
-// Handle assistance request
+// ============================
+// 3. Handle assistance request
+// ============================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) {
   $desc = trim($_POST['help_description']);
   $pc_id = $_POST['help_pc_id'];
@@ -53,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) 
 
   // Notify admin
   $admin_notif = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'admin', ?)");
-  $admin_message = "Student {$student['fullname']} requested assistance on PC #$pc_id.";
+  $admin_message = "Student requested assistance on PC #$pc_id.";
   $admin_id = 1;
   $admin_notif->bind_param("is", $admin_id, $admin_message);
   $admin_notif->execute();
@@ -63,7 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) 
   exit();
 }
 
-// Handle PC reservation request (pending approval)
+// ============================
+// 4. Handle PC reservation request (pending approval)
+// ============================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id'])) {
   $reserve_pc_id = $_POST['reserve_pc_id'];
   $reservation_date = $_POST['reservation_date'] ?? null;
@@ -88,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id'])) {
     // Notify admin
     $admin_id = 1;
     $admin_notif = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'admin', ?)");
-    $admin_msg = "🖥️ Student {$student['fullname']} requested to reserve PC #$reserve_pc_id for $reservation_date, $time_start to $time_end.";
+    $admin_msg = "🖥️ Student requested to reserve PC #$reserve_pc_id for $reservation_date, $time_start to $time_end.";
     $admin_notif->bind_param("is", $admin_id, $admin_msg);
     $admin_notif->execute();
 
@@ -100,18 +154,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id'])) {
   exit();
 }
 
-// Handle Time Out
-if (isset($_POST['time_out'])) {
-  $timeout_stmt = $conn->prepare("UPDATE lab_sessions SET status = 'inactive', logout_time = NOW() WHERE user_type='student' AND user_id = ? AND status = 'active'");
-  $timeout_stmt->bind_param("i", $student_id);
-  $timeout_stmt->execute();
+// ============================
+// 5. Fetch student info and PC info
+// ============================
+$student_stmt = $conn->prepare("SELECT fullname, email FROM students WHERE id = ?");
+$student_stmt->bind_param("i", $student_id);
+$student_stmt->execute();
+$student = $student_stmt->get_result()->fetch_assoc();
 
-  $_SESSION['flash_message'] = "✅ You have logged out from the session.";
-  header("Location: student_dashboard.php");
-  exit();
+// All PCs
+$pcsData = [];
+$pcsResult = $conn->query("SELECT id, pc_name, status FROM pcs");
+while ($row = $pcsResult->fetch_assoc()) {
+  $pcsData[] = $row;
 }
 
-// Active session
+// Group PCs by Lab
+$grouped_pcs = [];
+foreach ($pcsData as $pc) {
+  preg_match('/^(.*?)-PC-(\d+)$/', $pc['pc_name'], $matches);
+  $labGroup = isset($matches[1]) && $matches[1] !== '' ? $matches[1] : 'Other';
+  $grouped_pcs[$labGroup][] = $pc;
+}
+
+// Reserved Dates Per PC
+$reservedDatesPerPC = [];
+$reservedDatesSQL = $conn->query("SELECT pc_id, reservation_date FROM pc_reservations WHERE status IN ('pending','reserved','approved','completed')");
+while ($row = $reservedDatesSQL->fetch_assoc()) {
+  if ($row['reservation_date']) {
+    $reservedDatesPerPC[$row['pc_id']][] = $row['reservation_date'];
+  }
+}
+
+// ============================
+// 6. Check if the student has an active session
+// ============================
 $active_stmt = $conn->prepare("SELECT pc_id, login_time FROM lab_sessions WHERE user_type='student' AND user_id = ? AND status = 'active' ORDER BY login_time DESC LIMIT 1");
 $active_stmt->bind_param("i", $student_id);
 $active_stmt->execute();
@@ -123,13 +200,34 @@ $session_time = ($sessionResult && isset($sessionResult['login_time']))
     ? round((time() - strtotime($sessionResult['login_time'])) / 60) . ' minutes'
     : '-';
 
-// Recent logs
+// ============================
+// 7. Find upcoming reservation ready to start (for this student)
+// ============================
+$now_date = date('Y-m-d');
+$now_time = date('H:i:s');
+$res_stmt = $conn->prepare("
+    SELECT id, pc_id, time_start, time_end 
+    FROM pc_reservations 
+    WHERE student_id = ? AND status = 'approved' 
+      AND reservation_date = ? 
+      AND ? BETWEEN time_start AND time_end
+    LIMIT 1
+");
+$res_stmt->bind_param("iss", $student_id, $now_date, $now_time);
+$res_stmt->execute();
+$reservation_ready = $res_stmt->get_result()->fetch_assoc();
+
+// ============================
+// 8. Recent logs
+// ============================
 $log_stmt = $conn->prepare("SELECT pcs.pc_name, ls.login_time, ls.logout_time, ls.status FROM lab_sessions ls JOIN pcs ON pcs.id = ls.pc_id WHERE ls.user_type='student' AND ls.user_id = ? ORDER BY ls.login_time DESC LIMIT 10");
 $log_stmt->bind_param("i", $student_id);
 $log_stmt->execute();
 $logs = $log_stmt->get_result();
 
-// Notifications
+// ============================
+// 9. Notifications
+// ============================
 $query = "SELECT id, message, is_read, created_at FROM notifications WHERE recipient_type = 'student' AND recipient_id = ? ORDER BY created_at DESC";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $student_id);
@@ -152,7 +250,7 @@ while ($row = $result->fetch_assoc()) {
 </head>
 <body class="bg-gray-100 font-sans min-h-screen flex">
 
-<!-- SIDEBAR -->
+<!-- SIDEBAR (unchanged) -->
 <aside id="sidebar" class="w-64 bg-blue-900 text-white p-5 space-y-2 min-h-screen fixed md:static top-0 left-0 z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-300 overflow-y-auto hide-scrollbar">
   <div class="text-center mb-6">
     <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" class="w-16 mx-auto mb-2" />
@@ -209,7 +307,7 @@ while ($row = $result->fetch_assoc()) {
     </div>
   </div>
 
-  <!-- Dropdown -->
+  <!-- Notifications Dropdown (unchanged) -->
   <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-72 bg-white border rounded shadow-md z-50">
     <div class="p-3 font-semibold text-sm text-gray-700 border-b">Notifications</div>
     <ul class="max-h-64 overflow-y-auto text-sm">
@@ -244,6 +342,18 @@ while ($row = $result->fetch_assoc()) {
         <p><?= $session_time ?></p>
       </div>
     </div>
+
+    <!-- NEW: Start Session button if eligible -->
+    <?php if (!$sessionResult && $reservation_ready): ?>
+      <form method="POST" class="mt-6">
+        <input type="hidden" name="start_reservation_id" value="<?= $reservation_ready['id'] ?>">
+        <input type="hidden" name="start_pc_id" value="<?= $reservation_ready['pc_id'] ?>">
+        <button type="submit" name="start_session" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+          Start Session (<?= date('h:i A', strtotime($reservation_ready['time_start'])) ?> - <?= date('h:i A', strtotime($reservation_ready['time_end'])) ?>)
+        </button>
+      </form>
+    <?php endif; ?>
+
     <?php if ($session_status === 'Active'): ?>
       <form method="POST" class="mt-6">
         <button name="time_out" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Time Out</button>
@@ -390,8 +500,25 @@ while ($row = $result->fetch_assoc()) {
 window.groupedPCs = <?= json_encode($grouped_pcs) ?>;
 window.reservedDatesPerPC = <?= json_encode($reservedDatesPerPC) ?>;
 </script>
+<?php
+// --- For advanced reservation slot checking (date+time) ---
+$reservedSlots = [];
+$reservedSlotsSQL = $conn->query("SELECT pc_id, reservation_date, time_start, time_end, status FROM pc_reservations WHERE status IN ('pending','reserved','approved')");
+while ($row = $reservedSlotsSQL->fetch_assoc()) {
+  $reservedSlots[$row['pc_id']][] = [
+    'date' => $row['reservation_date'],
+    'start' => $row['time_start'],
+    'end' => $row['time_end'],
+    'status' => $row['status'],
+  ];
+}
+?>
+<script>
+window.reservedSlots = <?= json_encode($reservedSlots) ?>;
+</script>
+<!-- Only include your main JS ONCE here! -->
 <script src="/ilab/js/studentdashboard.js"></script>
 <script src="/ilab/js/pcstatus_realtime.js"></script>
-
 </body>
 </html>
+

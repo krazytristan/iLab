@@ -24,8 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'],
         $msg = "";
 
         if ($action === 'approve') {
-            $conn->query("UPDATE pcs SET status = 'in_use' WHERE id = $pc_id");
-            $conn->query("INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time) VALUES ('student', $student_id, $pc_id, 'active', NOW())");
+            // Only update reservation status to approved
             $conn->query("UPDATE pc_reservations SET status = 'approved', reason = NULL, updated_at = NOW() WHERE id = $res_id");
             $msg = "✅ Your PC reservation (PC #$pc_id) has been approved.";
         }
@@ -85,7 +84,9 @@ $pcUsed = $conn->query("SELECT COUNT(*) AS used FROM lab_sessions WHERE status =
 $pendingMaintenance = $conn->query("SELECT COUNT(*) AS pending FROM maintenance_requests WHERE status = 'pending'")->fetch_assoc()['pending'] ?? 0;
 $activeSessions = $conn->query("SELECT COUNT(*) AS active FROM lab_sessions WHERE status = 'active'")->fetch_assoc()['active'] ?? 0;
 $totalStudents = $conn->query("SELECT COUNT(*) AS count FROM students")->fetch_assoc()['count'] ?? 0;
-$totalReservations = $conn->query("SELECT COUNT(*) AS total FROM pc_reservations WHERE status = 'reserved'")->fetch_assoc()['total'] ?? 0;
+
+// Show all 'pending', 'approved', and 'reserved' reservations as active (use your own definition if needed)
+$totalReservations = $conn->query("SELECT COUNT(*) AS total FROM pc_reservations WHERE status IN ('pending','approved','reserved')")->fetch_assoc()['total'] ?? 0;
 
 // ==== RECENT ACTIVITIES ====
 $recentActivities = $conn->query("
@@ -143,7 +144,7 @@ $maintenanceList = $conn->query("
   ORDER BY m.created_at DESC
 ");
 
-// ==== ADMIN PROFILE (for Profile Settings) ====
+// ==== ADMIN PROFILE ====
 $admin_username = $_SESSION['admin'];
 $admin_stmt = $conn->prepare("SELECT username, email FROM admin_users WHERE username = ?");
 $admin_stmt->bind_param("s", $admin_username);
@@ -151,7 +152,6 @@ $admin_stmt->execute();
 $admin = $admin_stmt->get_result()->fetch_assoc();
 
 // ==== NOTIFICATIONS FOR ADMIN ====
-// Only count unread notifications for badge
 $unreadQuery = "
   SELECT COUNT(*) as unread
   FROM notifications
@@ -261,7 +261,7 @@ $problematicPCs = $conn->query("
   <div class="content px-6 pb-6">
     <!-- DASHBOARD -->
     <section id="dashboard" class="section active">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
         <div class="flex items-center gap-4 p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded shadow">
           <i class="fas fa-plug text-2xl text-indigo-600"></i>
           <div>
@@ -288,6 +288,13 @@ $problematicPCs = $conn->query("
           <div>
             <h3 class="text-lg font-semibold"><?= $totalStudents ?></h3>
             <p class="text-sm text-gray-700 dark:text-gray-300">Total Students</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 p-4 bg-green-50 border-l-4 border-green-500 rounded shadow">
+          <i class="fas fa-calendar-check text-2xl text-green-600"></i>
+          <div>
+            <h3 class="text-lg font-semibold"><?= $totalReservations ?></h3>
+            <p class="text-sm text-gray-700 dark:text-gray-300">Active Reservations</p>
           </div>
         </div>
         <div class="flex items-center gap-4 p-4 bg-green-50 border-l-4 border-green-500 rounded shadow">
