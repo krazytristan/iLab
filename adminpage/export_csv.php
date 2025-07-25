@@ -1,9 +1,9 @@
 <?php
 session_start();
-if (!isset($_SESSION['admin'])) {
+if (!isset($_SESSION['admin_username'])) {
     die("Unauthorized.");
 }
-require_once '../includes/db.php'; // adjust path if needed
+require_once '../includes/db.php';
 
 $type = $_GET['type'] ?? '';
 header('Content-Type: text/csv');
@@ -26,24 +26,30 @@ switch ($type) {
                 $row['pc_name'],
                 $row['issue_count'],
                 $row['status'],
-                $row['last_issue_date'] ? date('M d, Y', strtotime($row['last_issue_date'])) : '-'
+                $row['last_issue_date'] ? date('M d, Y h:i A', strtotime($row['last_issue_date'])) : '-'
             ]);
         }
         break;
 
     case 'reports':
-        fputcsv($output, ['Type', 'Details', 'Student', 'Date']);
+        fputcsv($output, ['Type', 'Details', 'Student', 'PC Name', 'Lab', 'Date']);
         $q = $conn->query("
-            SELECT r.report_type, r.details, s.fullname AS student, r.created_at
+            SELECT 
+                r.report_type, r.details, s.fullname AS student, 
+                pcs.pc_name, l.lab_name, r.created_at
             FROM reports r
             LEFT JOIN students s ON r.student_id = s.id
+            LEFT JOIN pcs ON r.pc_id = pcs.id
+            LEFT JOIN labs l ON pcs.lab_id = l.id
             ORDER BY r.created_at DESC
         ");
         while ($row = $q->fetch_assoc()) {
             fputcsv($output, [
                 $row['report_type'],
                 $row['details'],
-                $row['student'],
+                $row['student'] ?? 'Unknown',
+                $row['pc_name'] ?? 'N/A',
+                $row['lab_name'] ?? 'N/A',
                 date('M d, Y h:i A', strtotime($row['created_at']))
             ]);
         }
@@ -63,8 +69,8 @@ switch ($type) {
             fputcsv($output, [
                 $row['fullname'],
                 $row['pc_name'],
-                $row['login_time'],
-                $row['logout_time'],
+                $row['login_time'] ? date('M d, Y h:i A', strtotime($row['login_time'])) : '',
+                $row['logout_time'] ? date('M d, Y h:i A', strtotime($row['logout_time'])) : '',
                 $row['status']
             ]);
         }
@@ -85,9 +91,9 @@ switch ($type) {
                 $row['fullname'],
                 $row['pc_name'],
                 $row['reservation_date'] ? date('M d, Y', strtotime($row['reservation_date'])) : '',
-                date('M d, Y h:i A', strtotime($row['reservation_time'])),
+                $row['reservation_time'] ? date('M d, Y h:i A', strtotime($row['reservation_time'])) : '',
                 $row['status'],
-                $row['reason']
+                $row['reason'] ?? ''
             ]);
         }
         break;

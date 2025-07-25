@@ -11,28 +11,29 @@ if (isset($_SESSION['student_id'])) {
 // 2) Include database connection
 require_once __DIR__ . '/../includes/db.php';
 
-// 3) Handle login submission
-$alert = '';
+// 3) Handle alert messages (flash)
+$alert = $_SESSION['login_alert'] ?? '';
+unset($_SESSION['login_alert']);
+
+// 4) Handle login submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username']);  // email or USN/LRN
+    $username = trim($_POST['username']);
     $password = trim($_POST['password']);
 
     if ($username === '' || $password === '') {
-        $alert = 'Please fill in all fields.';
+        $_SESSION['login_alert'] = 'Please fill in all fields.';
     } else {
-        // 4) Fetch only the needed columns
         $stmt = $conn->prepare("
             SELECT id, fullname, usn_or_lrn, email, password
-              FROM students
-             WHERE email = ? OR usn_or_lrn = ?
-             LIMIT 1
+            FROM students
+            WHERE email = ? OR usn_or_lrn = ?
+            LIMIT 1
         ");
         $stmt->bind_param('ss', $username, $username);
         $stmt->execute();
         $user = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
-        // 5) Verify password
         if ($user && password_verify($password, $user['password'])) {
             session_regenerate_id(true);
             $_SESSION['student_id']   = $user['id'];
@@ -43,11 +44,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: student_dashboard.php');
             exit;
         } else {
-            $alert = 'Incorrect credentials.';
+            $_SESSION['login_alert'] = 'Incorrect credentials.';
         }
     }
+
+    // Redirect to clear POST and show alert
+    header('Location: student_login.php');
+    exit;
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -56,8 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <title>iLab Student Login</title>
   <link rel="stylesheet" href="/ilab/css/style.css"/>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
 <body class="user-page h-screen flex items-center justify-center font-sans relative overflow-hidden">
   <!-- Background Layers -->
@@ -75,8 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <!-- Alert -->
     <?php if ($alert): ?>
-      <div class="text-red-800 bg-red-100 border border-red-300
-                  rounded-md px-4 py-2 mb-4">
+      <div class="alert-message text-red-800 bg-red-100 border border-red-300
+                  rounded-md px-4 py-2 mb-4 transition-opacity duration-500">
         <?= htmlspecialchars($alert) ?>
       </div>
     <?php endif; ?>
@@ -132,5 +137,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       Powered by <span class="font-semibold text-blue-700">AMACC Lipa</span>
     </p>
   </div>
+
+  <!-- Auto-hide alert -->
+  <script>
+    const alertBox = document.querySelector('.alert-message');
+    if (alertBox) {
+      setTimeout(() => {
+        alertBox.style.opacity = '0';
+        setTimeout(() => alertBox.remove(), 500);
+      }, 3000);
+    }
+  </script>
 </body>
 </html>

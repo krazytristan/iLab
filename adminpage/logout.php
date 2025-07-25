@@ -1,20 +1,23 @@
 <?php
-session_start(); // Start the session
+session_start(); // Start session
 
-// Store user type before destroying the session
-$isAdmin = isset($_SESSION['admin']);
+// ✅ Store user role before destroying session
 $isStudent = isset($_SESSION['student_id']);
+$isAdmin = isset($_SESSION['admin_username']);
 
-session_unset();   // Remove all session variables
+// ✅ Clear session
+session_unset();   // Unset all session variables
 session_destroy(); // Destroy the session
 
-// Redirect to correct login page based on user type
-if ($isAdmin) {
+// ✅ Redirect based on previous session type
+if ($isStudent) {
+    header("Location: ../studentpage/student_login.php");
+    exit();
+} elseif ($isAdmin) {
     header("Location: ../adminpage/adminlogin.php");
-} elseif ($isStudent) {
-    header("Location: ../studentpage/student_login.php");
+    exit();
 } else {
-    // Default fallback (in case session expired or neither was set)
-    header("Location: ../studentpage/student_login.php");
+    // Default redirect (e.g., session expired or direct access)
+    header("Location: ../index.php");
+    exit();
 }
-exit();

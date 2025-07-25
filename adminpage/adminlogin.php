@@ -1,4 +1,10 @@
-<?php session_start(); ?>
+<?php
+session_start();
+if (isset($_SESSION['admin'])) {
+  header("Location: /adminpage/admindashboard.php");
+  exit();
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -68,10 +74,6 @@
         <i id="spinner" class="fas fa-spinner fa-spin hidden"></i>
       </button>
     </form>
-
-    <p class="text-center text-sm text-gray-500 mt-4">
-      Don't have an account? <a href="admin_register.php" class="text-blue-600 hover:underline">Register here</a>
-    </p>
 
     <p class="text-center text-sm text-gray-500 mt-4">
       Powered by <span class="font-semibold text-blue-700">AMACC Lipa</span>

@@ -1,30 +1,67 @@
 <?php
 session_start();
-require '../includes/db.php'; // <- Fixed path
+require '../includes/db.php';
 
-$token = $_GET['token'] ?? '';
+$token = $_GET['token'] ?? $_POST['token'] ?? '';
 
-// Handle invalid/missing token early
+// === Validate token existence ===
 if (!$token) {
-  $_SESSION['reset_error'] = "Invalid or missing reset token.";
-  header("Location: adminlogin.php");
-  exit();
+    $_SESSION['reset_error'] = "Missing reset token.";
+    header("Location: adminlogin.php");
+    exit();
 }
 
-// Check if token is valid and not expired
-$stmt = $conn->prepare("SELECT * FROM admin_users WHERE reset_token = ? AND reset_expires > NOW()");
+// === Check token validity (either from `admin_users` or `admin_password_resets`) ===
+$stmt = $conn->prepare("
+    SELECT au.id, au.username, au.email
+    FROM admin_users au
+    JOIN admin_password_resets apr ON apr.user_id = au.id
+    WHERE apr.token = ? AND apr.expires_at > NOW()
+    ORDER BY apr.created_at DESC
+    LIMIT 1
+");
 $stmt->bind_param("s", $token);
 $stmt->execute();
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
-  $_SESSION['reset_error'] = "Reset link is invalid or has expired.";
-  header("Location: adminlogin.php");
-  exit();
+    $_SESSION['reset_error'] = "Reset link is invalid or has expired.";
+    header("Location: ../adminpage/reset_password.php");
+    exit();
 }
 
 $user = $result->fetch_assoc();
+
+// === Handle password update ===
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $newPassword = $_POST['password'] ?? '';
+    $confirmPassword = $_POST['confirm_password'] ?? '';
+
+    if (empty($newPassword) || $newPassword !== $confirmPassword) {
+        $_SESSION['reset_error'] = "Passwords do not match or are empty.";
+        header("Location: ../adminpage/reset_password.php?token=" . urlencode($token));
+        exit();
+    }
+
+    $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
+
+    // Update admin password and delete token
+    $update = $conn->prepare("UPDATE admin_users SET password = ? WHERE id = ?");
+    $update->bind_param("si", $hashed, $user['id']);
+    $update->execute();
+
+    // Clear the used token
+    $delete = $conn->prepare("DELETE FROM admin_password_resets WHERE token = ?");
+    $delete->bind_param("s", $token);
+    $delete->execute();
+
+    $_SESSION['reset_success'] = "✅ Password reset successfully. You may now log in.";
+    header("Location: adminlogin.php");
+    exit();
+}
 ?>
+
+<!-- HTML PART -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -43,7 +80,13 @@ $user = $result->fetch_assoc();
       <p class="text-sm text-gray-500">Enter your new password below.</p>
     </div>
 
-    <form action="reset_process.php" method="POST" class="space-y-4">
+    <?php if (isset($_SESSION['reset_error'])): ?>
+      <div class="mb-4 bg-red-100 border border-red-300 text-red-700 px-4 py-2 rounded">
+        <?= $_SESSION['reset_error']; unset($_SESSION['reset_error']); ?>
+      </div>
+    <?php endif; ?>
+
+    <form action="reset_password.php" method="POST" class="space-y-4">
       <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
 
       <div>
@@ -68,6 +111,5 @@ $user = $result->fetch_assoc();
       Back to <a href="adminlogin.php" class="text-blue-600 hover:underline">Login</a>
     </p>
   </div>
-
 </body>
 </html>

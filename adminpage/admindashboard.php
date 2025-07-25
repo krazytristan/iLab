@@ -1,10 +1,71 @@
 <?php
 session_start();
-if (!isset($_SESSION['admin'])) {
-    header("Location: adminlogin.php");
+require_once '../includes/db.php'; // ✅ Make sure this is included before using $conn
+
+if (!isset($_SESSION['admin_username'])) {
+    header("Location: ../adminpage/adminlogin.php");
     exit();
 }
-require_once '../includes/db.php';
+
+// Get session values
+$admin_username = $_SESSION['admin_username'];
+$admin_role = $_SESSION['admin_role'] ?? 'admin';
+$is_super_admin = ($admin_role === 'super');
+
+// Fetch logged-in admin data
+$admin_id = $_SESSION['admin_id'];
+$stmt = $conn->prepare("SELECT * FROM admin_users WHERE id = ?");
+$stmt->bind_param("i", $admin_id);
+$stmt->execute();
+$result = $stmt->get_result();
+$admin = $result->fetch_assoc();
+$stmt->close();
+
+// Ensure role check from DB
+$is_super_admin = isset($admin['role']) && $admin['role'] === 'super_admin';
+
+// Fetch all admin users
+$all_admins = [];
+$stmt = $conn->prepare("SELECT id, username, email, role, created_at FROM admin_users ORDER BY created_at DESC");
+if ($stmt && $stmt->execute()) {
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        $all_admins[] = $row;
+    }
+    $stmt->close();
+}
+
+// ✅ Function to auto-start lab session
+function admin_auto_start_session($conn, $student_id, $pc_id, $reservation_id) {
+    // Check if there's already an active session
+    $check = $conn->prepare("
+        SELECT id FROM lab_sessions 
+        WHERE user_type = 'student' AND user_id = ? AND pc_id = ? AND status = 'active'
+    ");
+    $check->bind_param("ii", $student_id, $pc_id);
+    $check->execute();
+    $result = $check->get_result();
+    $exists = $result->num_rows > 0;
+    $check->close();
+
+    if ($exists) return false;
+
+    // Start the lab session
+    $start = $conn->prepare("
+        INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time, reservation_id)
+        VALUES ('student', ?, ?, 'active', NOW(), ?)
+    ");
+    $start->bind_param("iii", $student_id, $pc_id, $reservation_id);
+    $ok = $start->execute();
+    $start->close();
+
+    // Update PC status
+    if ($ok) {
+        $conn->query("UPDATE pcs SET status = 'in_use' WHERE id = $pc_id");
+    }
+
+    return $ok;
+}
 
 // ==== RESERVATION ACTION HANDLER ====
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'], $_POST['res_id'])) {
@@ -12,40 +73,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'],
     $action = $_POST['reservation_action'];
     $reason = $_POST['reason'] ?? null;
 
-    // Fetch reservation info
-    $stmt = $conn->prepare("SELECT pc_id, student_id FROM pc_reservations WHERE id = ?");
+    $stmt = $conn->prepare("
+        SELECT pc_id, student_id, reservation_date, time_start, time_end, status
+        FROM pc_reservations WHERE id = ?
+    ");
     $stmt->bind_param("i", $res_id);
     $stmt->execute();
     $res = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
 
     if ($res) {
-        $pc_id = $res['pc_id'];
-        $student_id = $res['student_id'];
+        $pc_id = (int)$res['pc_id'];
+        $student_id = (int)$res['student_id'];
         $msg = "";
 
         if ($action === 'approve') {
-            // Only update reservation status to approved
             $conn->query("UPDATE pc_reservations SET status = 'approved', reason = NULL, updated_at = NOW() WHERE id = $res_id");
-            $msg = "✅ Your PC reservation (PC #$pc_id) has been approved.";
+
+            $ok = admin_auto_start_session($conn, $student_id, $pc_id, $res_id);
+            $msg = $ok
+                ? "✅ Your PC reservation (PC #$pc_id) was approved and your session has started automatically."
+                : "✅ Your PC reservation (PC #$pc_id) was approved, but session auto-start failed.";
         }
         elseif ($action === 'reject') {
-            $conn->query("UPDATE pc_reservations SET status = 'rejected', reason = '".addslashes($reason)."', updated_at = NOW() WHERE id = $res_id");
-            $msg = "❌ Your PC reservation (PC #$pc_id) was rejected by the admin." . ($reason ? " Reason: $reason" : "");
+            $stmt2 = $conn->prepare("UPDATE pc_reservations SET status = 'rejected', reason = ?, updated_at = NOW() WHERE id = ?");
+            $stmt2->bind_param("si", $reason, $res_id);
+            $stmt2->execute();
+            $stmt2->close();
+            $msg = "❌ Your PC reservation (PC #$pc_id) was rejected." . ($reason ? " Reason: $reason" : "");
         }
         elseif ($action === 'cancel') {
-            $conn->query("UPDATE pc_reservations SET status = 'cancelled', reason = '".addslashes($reason)."', updated_at = NOW() WHERE id = $res_id");
-            $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled by the admin." . ($reason ? " Reason: $reason" : "");
+            $conn->query("
+                UPDATE lab_sessions 
+                SET status='inactive', logout_time=NOW()
+                WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_id AND status='active'
+            ");
+            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_id");
+
+            $stmt2 = $conn->prepare("UPDATE pc_reservations SET status = 'cancelled', reason = ?, updated_at = NOW() WHERE id = ?");
+            $stmt2->bind_param("si", $reason, $res_id);
+            $stmt2->execute();
+            $stmt2->close();
+            $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled." . ($reason ? " Reason: $reason" : "");
         }
         elseif ($action === 'completed') {
+            $conn->query("
+                UPDATE lab_sessions 
+                SET status='inactive', logout_time=NOW()
+                WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_id AND status='active'
+            ");
+            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_id");
+
             $conn->query("UPDATE pc_reservations SET status = 'completed', updated_at = NOW() WHERE id = $res_id");
-            $msg = "✅ Your PC reservation (PC #$pc_id) has been marked as completed by the admin.";
+            $msg = "✅ Your PC reservation (PC #$pc_id) was marked as completed.";
         }
 
-        // Notify student if needed
+        // Notify the student
         if ($msg) {
             $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
             $notif_stmt->bind_param("is", $student_id, $msg);
             $notif_stmt->execute();
+            $notif_stmt->close();
         }
     }
 
@@ -64,7 +152,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['maint_action'], $_POS
         $updateStmt->bind_param("si", $action, $mid);
         $updateStmt->execute();
 
-        // Notify student if student_id exists for maintenance request
         $userInfo = $conn->query("SELECT student_id, pc_id FROM maintenance_requests WHERE id = $mid")->fetch_assoc();
         if ($userInfo && $userInfo['student_id']) {
             $pc_id = $userInfo['pc_id'];
@@ -84,8 +171,6 @@ $pcUsed = $conn->query("SELECT COUNT(*) AS used FROM lab_sessions WHERE status =
 $pendingMaintenance = $conn->query("SELECT COUNT(*) AS pending FROM maintenance_requests WHERE status = 'pending'")->fetch_assoc()['pending'] ?? 0;
 $activeSessions = $conn->query("SELECT COUNT(*) AS active FROM lab_sessions WHERE status = 'active'")->fetch_assoc()['active'] ?? 0;
 $totalStudents = $conn->query("SELECT COUNT(*) AS count FROM students")->fetch_assoc()['count'] ?? 0;
-
-// Show all 'pending', 'approved', and 'reserved' reservations as active (use your own definition if needed)
 $totalReservations = $conn->query("SELECT COUNT(*) AS total FROM pc_reservations WHERE status IN ('pending','approved','reserved')")->fetch_assoc()['total'] ?? 0;
 
 // ==== RECENT ACTIVITIES ====
@@ -103,7 +188,24 @@ $recentActivities = $conn->query("
   ORDER BY la.timestamp DESC
   LIMIT 10
 ");
-
+// Fetch recent activities (last 10 logins/logouts)
+$recentActivities = $conn->query("
+  SELECT 
+    CONCAT(CASE user_type WHEN 'student' THEN s.fullname WHEN 'admin' THEN a.username END) AS user,
+    ls.pc_id AS pc_no,
+    ls.status AS session_status,
+    CASE 
+      WHEN ls.status = 'active' THEN 'login'
+      ELSE 'logout'
+    END AS action,
+    IF(ls.status = 'active', ls.login_time, ls.logout_time) AS timestamp
+  FROM lab_sessions ls
+  LEFT JOIN students s ON (ls.user_type = 'student' AND ls.user_id = s.id)
+  LEFT JOIN admin_users a ON (ls.user_type = 'admin' AND ls.user_id = a.id)
+  WHERE ls.login_time IS NOT NULL
+  ORDER BY timestamp DESC
+  LIMIT 10
+");
 // ==== RESERVATIONS TABLE ====
 $reservations = $conn->query("
   SELECT r.id, s.fullname, p.pc_name, r.reservation_time, r.status, r.reason, r.reservation_date
@@ -128,13 +230,24 @@ $userLogs = $conn->query("
   LIMIT 50
 ");
 
-// ==== REPORTS ====
+// ==== REPORTS (live status via v_pc_current_status) ====
 $reports = $conn->query("
-  SELECT r.id, r.report_type, r.details, r.created_at, s.fullname AS student
+  SELECT r.id,
+         r.report_type,
+         r.details,
+         r.created_at,
+         s.fullname AS student,
+         p.pc_name,
+         l.lab_name,
+         COALESCE(vpcs.computed_status, p.status) AS current_status
   FROM reports r
-  LEFT JOIN students s ON r.student_id = s.id
+  LEFT JOIN students s ON s.id = r.student_id
+  LEFT JOIN pcs p ON p.id = r.pc_id
+  LEFT JOIN labs l ON l.id = p.lab_id
+  LEFT JOIN v_pc_current_status vpcs ON vpcs.pc_id = p.id
   ORDER BY r.created_at DESC
 ");
+
 
 // ==== MAINTENANCE REQUESTS ====
 $maintenanceList = $conn->query("
@@ -145,44 +258,40 @@ $maintenanceList = $conn->query("
 ");
 
 // ==== ADMIN PROFILE ====
-$admin_username = $_SESSION['admin'];
 $admin_stmt = $conn->prepare("SELECT username, email FROM admin_users WHERE username = ?");
 $admin_stmt->bind_param("s", $admin_username);
 $admin_stmt->execute();
 $admin = $admin_stmt->get_result()->fetch_assoc();
 
 // ==== NOTIFICATIONS FOR ADMIN ====
-$unreadQuery = "
-  SELECT COUNT(*) as unread
-  FROM notifications
-  WHERE recipient_type = 'admin' AND (read_at IS NULL)
-";
-$newNotiCount = $conn->query($unreadQuery)->fetch_assoc()['unread'] ?? 0;
+$newNotiCount = $conn->query("
+  SELECT COUNT(*) as unread FROM notifications WHERE recipient_type = 'admin' AND (read_at IS NULL)
+")->fetch_assoc()['unread'] ?? 0;
 
-// Get ALL notifications (for display, including read_at)
-$notifications_sql = "
+$notifications = $conn->query("
   SELECT n.id, n.message, n.created_at, n.read_at, s.fullname
   FROM notifications n
   LEFT JOIN students s ON n.recipient_id = s.id
   WHERE n.recipient_type = 'admin'
   ORDER BY n.created_at DESC
-";
-$notifications = $conn->query($notifications_sql);
+");
 
-// ==== MOST PROBLEMATIC PCs (TOP 5) ====
+// ==== MOST PROBLEMATIC PCs (TOP 5) with Real-time Status ====
 $problematicPCs = $conn->query("
     SELECT 
         pcs.pc_name, 
-        pcs.status, 
+        COALESCE(vpcs.computed_status, pcs.status) AS status,
         COUNT(mr.id) AS issue_count,
         MAX(mr.created_at) AS last_issue_date
     FROM maintenance_requests mr
     JOIN pcs ON mr.pc_id = pcs.id
+    LEFT JOIN v_pc_current_status vpcs ON vpcs.pc_id = pcs.id
     GROUP BY pcs.id
     ORDER BY issue_count DESC
     LIMIT 5
 ");
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -218,7 +327,7 @@ $problematicPCs = $conn->query("
 <main class="main flex flex-col w-full">
   <header class="main-header flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 relative">
     <div>
-      <h2 class="text-xl font-semibold">Welcome, <?= htmlspecialchars($_SESSION['admin']); ?></h2>
+      <h2 class="text-xl font-semibold">Welcome, <?= htmlspecialchars($_SESSION['admin_username']); ?></h2>
       <p>System check as of <span id="date"></span></p>
     </div>
     <div class="flex gap-4 items-center relative">
@@ -251,7 +360,7 @@ $problematicPCs = $conn->query("
         <i id="darkIcon" class="fas fa-moon"></i>
         <span id="darkLabel" class="hidden sm:inline">Dark Mode</span>
       </button>
-      <a href="logout.php" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded flex items-center gap-2">
+      <a href="../adminpage/logout.php" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded flex items-center gap-2">
         <i class="fas fa-sign-out-alt"></i>
         <span class="hidden sm:inline">Logout</span>
       </a>
@@ -322,122 +431,176 @@ $problematicPCs = $conn->query("
       </div>
     </section>
     
-    <!-- RESERVATIONS -->
-    <section id="reservations" class="section">
-      <h3 class="text-lg font-semibold mb-4">PC Reservations</h3>
-      <div class="flex justify-between items-center mb-3">
-        <input type="text" id="resSearch" placeholder="Search by student, PC, or status..." class="border px-2 py-1 rounded w-1/2">
-        <a href="export_csv.php?type=reservations" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" target="_blank">
-        <i class="fas fa-file-csv"></i> Export CSV
-      </a>
-      </div>
-      <table class="w-full border border-gray-300 dark:border-gray-700" id="resTable">
-        <thead class="bg-gray-200 dark:bg-gray-800">
-          <tr>
-            <th class="px-4 py-2 text-left">Student</th>
-            <th class="px-4 py-2 text-left">PC</th>
-            <th class="px-4 py-2 text-left">Reservation Date</th>
-            <th class="px-4 py-2 text-left">Requested At</th>
-            <th class="px-4 py-2 text-left">Status</th>
-            <th class="px-4 py-2 text-left">Reason</th>
-            <th class="px-4 py-2 text-left">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-          while($r = $reservations->fetch_assoc()):
-            $status = strtolower($r['status']);
-            $badge = match($status) {
-              'pending'   => 'bg-yellow-200 text-yellow-800',
-              'reserved'  => 'bg-blue-200 text-blue-800',
-              'approved'  => 'bg-green-200 text-green-800',
-              'cancelled' => 'bg-red-200 text-red-800',
-              'rejected'  => 'bg-red-200 text-red-800',
-              'expired'   => 'bg-gray-200 text-gray-700',
-              'completed' => 'bg-gray-300 text-gray-900',
-              default     => 'bg-gray-200 text-gray-700'
-            };
-          ?>
-            <tr class="border-t border-gray-300 dark:border-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name'] . ' ' . $r['status']) ?>">
-              <td class="px-4 py-2"><?= htmlspecialchars($r['fullname']) ?></td>
-              <td class="px-4 py-2"><?= htmlspecialchars($r['pc_name']) ?></td>
-              <td class="px-4 py-2"><?= $r['reservation_date'] ? date('M d, Y', strtotime($r['reservation_date'])) : '<span class="text-gray-400">—</span>' ?></td>
-              <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($r['reservation_time'])) ?></td>
-              <td class="px-4 py-2">
-                <span class="px-2 py-1 rounded <?= $badge ?> capitalize"><?= ucfirst($status) ?></span>
-              </td>
-              <td class="px-4 py-2"><?= $r['reason'] ? htmlspecialchars($r['reason']) : '<span class="text-gray-400">—</span>' ?></td>
-              <td class="px-4 py-2">
-                <?php if ($status === 'pending'): ?>
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
-                    <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
-                    <button name="reservation_action" value="reject" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
-                            onclick="return promptReason(this)">Reject</button>
-                  </form>
-                <?php elseif ($status === 'reserved'): ?>
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
-                    <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700">Approve</button>
-                    <button name="reservation_action" value="cancel" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
-                            onclick="return promptReason(this)">Cancel</button>
-                  </form>
-                <?php elseif ($status === 'approved'): ?>
-                  <form method="POST" class="inline">
-                    <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
-                    <button name="reservation_action" value="completed" class="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">Mark Completed</button>
-                  </form>
-                <?php else: ?>
-                  <span class="text-gray-400 italic">N/A</span>
-                <?php endif; ?>
-              </td>
-            </tr>
-          <?php endwhile; ?>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- USER LOGS -->
-<section id="userlogs" class="section">
-  <h3 class="text-lg font-semibold mb-4">User Logs</h3>
-  <div class="flex justify-between items-center mb-3">
-    <input type="text" id="logSearch" placeholder="Search logs..." class="border px-2 py-1 rounded w-1/2">
-    <a href="export_csv.php?type=userlogs" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" target="_blank">
+<!-- RESERVATIONS -->
+<section id="reservations" class="section mt-10">
+  <h3 class="text-lg font-semibold mb-4">PC Reservations</h3>
+  <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+    <input type="text" id="resSearch" placeholder="Search by student, PC, or status..." 
+           class="border px-3 py-2 rounded w-full md:w-1/2 dark:bg-gray-700 dark:text-white dark:border-gray-600">
+    <a href="export_csv.php?type=reservations" 
+       class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm whitespace-nowrap">
       <i class="fas fa-file-csv"></i> Export CSV
     </a>
   </div>
-  <table class="w-full border border-gray-300 dark:border-gray-700" id="logTable">
-    <thead class="bg-gray-200 dark:bg-gray-800">
-      <tr>
-        <th class="px-4 py-2 text-left">Student</th>
-        <th class="px-4 py-2 text-left">PC</th>
-        <th class="px-4 py-2 text-left">Login</th>
-        <th class="px-4 py-2 text-left">Logout</th>
-        <th class="px-4 py-2 text-left">Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      <?php if ($userLogs && $userLogs->num_rows > 0): ?>
-        <?php while ($log = $userLogs->fetch_assoc()): ?>
-          <tr data-log="<?= strtolower($log['fullname'] . ' ' . $log['pc_name'] . ' ' . $log['status']) ?>">
-            <td class="px-4 py-2"><?= htmlspecialchars($log['fullname']) ?></td>
-            <td class="px-4 py-2"><?= htmlspecialchars($log['pc_name']) ?></td>
-            <td class="px-4 py-2"><?= htmlspecialchars($log['login_time']) ?></td>
-            <td class="px-4 py-2"><?= $log['logout_time'] ?? '-' ?></td>
-            <td class="px-4 py-2"><?= htmlspecialchars($log['status']) ?></td>
+
+  <div class="overflow-x-auto rounded shadow border border-gray-300 dark:border-gray-700">
+    <table class="w-full text-sm table-auto" id="resTable">
+      <thead class="bg-gray-200 dark:bg-gray-800">
+        <tr>
+          <th class="px-4 py-2 text-left">Student</th>
+          <th class="px-4 py-2 text-left">PC</th>
+          <th class="px-4 py-2 text-left">Reservation Date</th>
+          <th class="px-4 py-2 text-left">Requested At</th>
+          <th class="px-4 py-2 text-left">Status</th>
+          <th class="px-4 py-2 text-left">Reason</th>
+          <th class="px-4 py-2 text-left">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php while($r = $reservations->fetch_assoc()):
+          $status = strtolower($r['status']);
+          $badge = match($status) {
+            'pending'   => 'bg-yellow-200 text-yellow-800',
+            'reserved'  => 'bg-blue-200 text-blue-800',
+            'approved'  => 'bg-green-200 text-green-800',
+            'cancelled', 'rejected' => 'bg-red-200 text-red-800',
+            'expired'   => 'bg-gray-200 text-gray-700',
+            'completed' => 'bg-gray-300 text-gray-900',
+            default     => 'bg-gray-200 text-gray-700'
+          };
+        ?>
+          <tr class="border-t hover:bg-gray-50 dark:hover:bg-gray-700" data-row="<?= strtolower($r['fullname'] . ' ' . $r['pc_name'] . ' ' . $r['status']) ?>">
+            <td class="px-4 py-2"><?= htmlspecialchars($r['fullname']) ?></td>
+            <td class="px-4 py-2"><?= htmlspecialchars($r['pc_name']) ?></td>
+            <td class="px-4 py-2"><?= $r['reservation_date'] ? date('M d, Y', strtotime($r['reservation_date'])) : '<span class="text-gray-400">—</span>' ?></td>
+            <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($r['reservation_time'])) ?></td>
+            <td class="px-4 py-2">
+              <span class="px-2 py-1 rounded text-xs font-semibold <?= $badge ?> capitalize"><?= ucfirst($status) ?></span>
+            </td>
+            <td class="px-4 py-2"><?= $r['reason'] ? htmlspecialchars($r['reason']) : '<span class="text-gray-400">—</span>' ?></td>
+            <td class="px-4 py-2">
+              <?php if ($status === 'pending'): ?>
+                <form method="POST" class="inline">
+                  <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                  <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700 text-xs">Approve</button>
+                  <button name="reservation_action" value="reject" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 text-xs" onclick="return promptReason(this)">Reject</button>
+                </form>
+              <?php elseif ($status === 'reserved'): ?>
+                <form method="POST" class="inline">
+                  <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                  <button name="reservation_action" value="approve" class="bg-blue-600 text-white px-2 py-1 rounded mr-1 hover:bg-blue-700 text-xs">Approve</button>
+                  <button name="reservation_action" value="cancel" class="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 text-xs" onclick="return promptReason(this)">Cancel</button>
+                </form>
+              <?php elseif ($status === 'approved'): ?>
+                <form method="POST" class="inline">
+                  <input type="hidden" name="res_id" value="<?= $r['id'] ?>">
+                  <button name="reservation_action" value="completed" class="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 text-xs">Mark Completed</button>
+                </form>
+              <?php else: ?>
+                <span class="text-gray-400 italic text-xs">N/A</span>
+              <?php endif; ?>
+            </td>
           </tr>
         <?php endwhile; ?>
-      <?php else: ?>
-        <tr>
-          <td colspan="5" class="text-center text-gray-500">No user logs available.</td>
-        </tr>
-      <?php endif; ?>
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
 </section>
 
-    <!-- REPORTS -->
-  <section id="reports" class="section">
+<!-- Reservation search -->
+<script>
+  document.getElementById('resSearch').addEventListener('input', function () {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('#resTable tbody tr').forEach(row => {
+      row.style.display = row.dataset.row.includes(query) ? '' : 'none';
+    });
+  });
+
+  function promptReason(btn) {
+    const reason = prompt("Enter reason:");
+    if (!reason) return false;
+
+    const form = btn.closest("form");
+    const hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.name = "reason";
+    hidden.value = reason;
+    form.appendChild(hidden);
+    return true;
+  }
+</script>
+
+
+<!-- USER LOGS -->
+<section id="userlogs" class="section mt-10">
+  <h3 class="text-lg font-semibold mb-4">User Logs</h3>
+  <div class="flex justify-between items-center mb-3">
+    <input type="text" id="logSearch" placeholder="Search logs..." class="border px-3 py-1 rounded w-1/2 dark:bg-gray-700 dark:text-white dark:border-gray-600">
+    <a href="export_csv.php?type=userlogs" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm" target="_blank">
+      <i class="fas fa-file-csv"></i> Export CSV
+    </a>
+  </div>
+  <div class="overflow-x-auto rounded shadow border border-gray-300 dark:border-gray-700">
+    <table class="w-full text-sm table-auto" id="logTable">
+      <thead class="bg-gray-200 dark:bg-gray-800">
+        <tr>
+          <th class="px-4 py-2 text-left">Student</th>
+          <th class="px-4 py-2 text-left">PC</th>
+          <th class="px-4 py-2 text-left">Login</th>
+          <th class="px-4 py-2 text-left">Logout</th>
+          <th class="px-4 py-2 text-left">Duration</th>
+          <th class="px-4 py-2 text-left">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if ($userLogs && $userLogs->num_rows > 0): ?>
+          <?php while ($log = $userLogs->fetch_assoc()): ?>
+            <?php
+              $login = strtotime($log['login_time']);
+              $logout = $log['logout_time'] ? strtotime($log['logout_time']) : null;
+              $duration = $logout ? gmdate("H:i:s", $logout - $login) : '-';
+            ?>
+            <tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700" data-log="<?= strtolower($log['fullname'] . ' ' . $log['pc_name'] . ' ' . $log['status']) ?>">
+              <td class="px-4 py-2"><?= htmlspecialchars($log['fullname']) ?></td>
+              <td class="px-4 py-2"><?= htmlspecialchars($log['pc_name']) ?></td>
+              <td class="px-4 py-2 text-blue-700"><?= date('M d, Y h:i A', strtotime($log['login_time'])) ?></td>
+              <td class="px-4 py-2 text-gray-600">
+                <?= $log['logout_time'] ? date('M d, Y h:i A', strtotime($log['logout_time'])) : '<span class="italic text-red-500">Active</span>' ?>
+              </td>
+              <td class="px-4 py-2 text-sm text-gray-800 dark:text-gray-300">
+                <?= $duration !== '-' ? $duration : '<span class="italic text-gray-400">N/A</span>' ?>
+              </td>
+              <td class="px-4 py-2">
+                <span class="px-2 py-1 rounded text-xs font-semibold 
+                  <?= $log['status'] === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-800' ?>">
+                  <?= ucfirst($log['status']) ?>
+                </span>
+              </td>
+            </tr>
+          <?php endwhile; ?>
+        <?php else: ?>
+          <tr>
+            <td colspan="6" class="px-4 py-4 text-center text-gray-500">No user logs available.</td>
+          </tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Search script -->
+<script>
+  document.getElementById('logSearch').addEventListener('input', function () {
+    const search = this.value.toLowerCase();
+    document.querySelectorAll('#logTable tbody tr').forEach(row => {
+      row.style.display = row.dataset.log.includes(search) ? '' : 'none';
+    });
+  });
+</script>
+
+
+  <!-- REPORTS -->
+<section id="reports" class="section">
   <h3 class="text-lg font-semibold mb-4">System Reports</h3>
 
   <!-- Top Problematic PCs Table -->
@@ -462,58 +625,33 @@ $problematicPCs = $conn->query("
           <?php if ($problematicPCs && $problematicPCs->num_rows > 0): ?>
             <?php while ($row = $problematicPCs->fetch_assoc()): ?>
               <tr class="odd:bg-gray-50 hover:bg-gray-100">
-                <td class="px-4 py-2"><?= htmlspecialchars($row['pc_name']) ?></td>
-                <td class="px-4 py-2"><?= $row['issue_count'] ?></td>
-                <td class="px-4 py-2"><?= htmlspecialchars($row['status']) ?></td>
+                <td class="px-4 py-2 font-medium"><?= htmlspecialchars($row['pc_name']) ?></td>
+                <td class="px-4 py-2"><?= (int)$row['issue_count'] ?></td>
                 <td class="px-4 py-2">
-                  <?= $row['last_issue_date'] ? date('M d, Y', strtotime($row['last_issue_date'])) : '-' ?>
+                  <?php
+                    $status = strtolower($row['status']);
+                    $statusBadge = ($status === 'available') 
+                      ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">Available</span>'
+                      : '<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs">Under Maintenance</span>';
+                    echo $statusBadge;
+                  ?>
+                </td>
+                <td class="px-4 py-2 text-sm text-gray-600">
+                  <?= $row['last_issue_date'] ? date('M d, Y h:i A', strtotime($row['last_issue_date'])) : '-' ?>
                 </td>
               </tr>
             <?php endwhile; ?>
           <?php else: ?>
             <tr>
-              <td colspan="4" class="px-4 py-2 text-center text-gray-500">No issues reported.</td>
+              <td colspan="4" class="px-4 py-4 text-center text-gray-500">No issues reported.</td>
             </tr>
           <?php endif; ?>
         </tbody>
       </table>
     </div>
   </div>
-
-  <!-- Original Reports Table -->
-  <div class="flex justify-between items-center mb-3">
-    <span></span>
-    <a href="export_csv.php?type=reports" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" target="_blank">
-      <i class="fas fa-file-csv"></i> Export CSV
-    </a>
-  </div>
-  <?php if ($reports->num_rows > 0): ?>
-    <div class="overflow-x-auto rounded shadow border border-gray-200">
-      <table class="w-full text-sm border border-gray-300 dark:border-gray-700">
-        <thead class="bg-gray-200 dark:bg-gray-800">
-          <tr>
-            <th class="px-4 py-2 text-left">Type</th>
-            <th class="px-4 py-2 text-left">Details</th>
-            <th class="px-4 py-2 text-left">Student</th>
-            <th class="px-4 py-2 text-left">Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php while ($rep = $reports->fetch_assoc()): ?>
-            <tr class="border-t border-gray-300 dark:border-gray-700">
-              <td class="px-4 py-2"><?= htmlspecialchars($rep['report_type']) ?></td>
-              <td class="px-4 py-2"><?= htmlspecialchars($rep['details']) ?></td>
-              <td class="px-4 py-2"><?= htmlspecialchars($rep['student']) ?></td>
-              <td class="px-4 py-2"><?= date('M d, Y h:i A', strtotime($rep['created_at'])) ?></td>
-            </tr>
-          <?php endwhile; ?>
-        </tbody>
-      </table>
-    </div>
-  <?php else: ?>
-    <p class="text-gray-600 dark:text-gray-400">No reports available.</p>
-  <?php endif; ?>
 </section>
+
 
     <!-- MAINTENANCE -->
     <section id="maintenance" class="section">
@@ -584,27 +722,104 @@ $problematicPCs = $conn->query("
       <?php endif; ?>
     </section>
 
-    <!-- PROFILE SETTINGS -->
-    <section id="profilesettings" class="section">
-      <h3 class="text-lg font-semibold mb-4">Profile Settings</h3>
-      <form action="update_profile_settings.php" method="POST" class="space-y-4 max-w-md">
-        <div>
-          <label class="block font-semibold">Username</label>
-          <input type="text" name="username" class="w-full px-3 py-2 border rounded" value="<?= htmlspecialchars($admin['username']) ?>" required readonly>
-        </div>
-        <div>
-          <label class="block font-semibold">Email</label>
-          <input type="email" name="email" class="w-full px-3 py-2 border rounded" value="<?= htmlspecialchars($admin['email']) ?>" required>
-        </div>
-        <div>
-          <label class="block font-semibold">New Password <span class="text-xs text-gray-500">(leave blank to keep current)</span></label>
-          <input type="password" name="new_password" class="w-full px-3 py-2 border rounded" placeholder="Enter new password">
-        </div>
-        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Save Changes</button>
-      </form>
-    </section>
+<!-- ==================== -->
+<!-- PROFILE SETTINGS     -->
+<!-- ==================== -->
+<section id="profilesettings" class="section">
+  <h3 class="text-lg font-semibold mb-4">Profile Settings</h3>
+
+  <!-- Update Own Info -->
+  <form action="update_profile_settings.php" method="POST" class="space-y-4 max-w-md mb-10">
+    <div>
+      <label class="block font-semibold">Username</label>
+      <input type="text" name="username" class="w-full px-3 py-2 border rounded bg-gray-100" 
+             value="<?= htmlspecialchars($admin['username']) ?>" readonly>
+    </div>
+
+    <div>
+      <label class="block font-semibold">Email</label>
+      <input type="email" name="email" class="w-full px-3 py-2 border rounded" 
+             value="<?= htmlspecialchars($admin['email']) ?>" <?= $is_super_admin ? 'readonly' : 'required' ?>>
+    </div>
+
+    <?php if (!$is_super_admin): ?>
+    <div>
+      <label class="block font-semibold">New Password 
+        <span class="text-sm text-gray-500">(leave blank to keep current)</span>
+      </label>
+      <input type="password" name="new_password" class="w-full px-3 py-2 border rounded" placeholder="Enter new password">
+    </div>
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+      Save Changes
+    </button>
+    <?php endif; ?>
+  </form>
+
+  <!-- Add Admin (Visible to Super Admin Only) -->
+  <?php if ($is_super_admin): ?>
+  <h4 class="text-md font-semibold mb-2">Add New Admin</h4>
+  <form action="add_admin.php" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <input type="text" name="new_username" placeholder="Username" required class="px-3 py-2 border rounded">
+    <input type="email" name="new_email" placeholder="Email" required class="px-3 py-2 border rounded">
+    <input type="password" name="new_password" placeholder="Password" required class="px-3 py-2 border rounded">
+    <select name="new_role" class="px-3 py-2 border rounded" required>
+      <option value="admin">Admin</option>
+      <option value="super_admin">Super Admin</option>
+    </select>
+    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 col-span-full md:col-auto">
+      Add Admin
+    </button>
+  </form>
+
+  <!-- Admin List -->
+  <h4 class="text-md font-semibold mb-2">All Admins</h4>
+  <input type="text" id="searchAdmin" placeholder="Search..." class="mb-2 px-3 py-1 border rounded w-full md:w-1/3">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border">
+      <thead class="bg-gray-100">
+        <tr>
+          <th class="text-left px-3 py-2 border">Username</th>
+          <th class="text-left px-3 py-2 border">Email</th>
+          <th class="text-left px-3 py-2 border">Role</th>
+          <th class="text-center px-3 py-2 border">Action</th>
+        </tr>
+      </thead>
+      <tbody id="adminList">
+        <?php foreach ($all_admins as $a): ?>
+          <tr class="hover:bg-gray-50">
+            <td class="px-3 py-2 border"><?= htmlspecialchars($a['username']) ?></td>
+            <td class="px-3 py-2 border"><?= htmlspecialchars($a['email']) ?></td>
+            <td class="px-3 py-2 border"><?= ucfirst(htmlspecialchars($a['role'])) ?></td>
+            <td class="px-3 py-2 border text-center">
+              <?php if (!isset($admin['id']) || $a['id'] !== $admin['id']): ?>
+                <form action="delete_admin.php" method="POST" onsubmit="return confirm('Are you sure you want to delete this admin?')">
+                  <input type="hidden" name="admin_id" value="<?= htmlspecialchars($a['id']) ?>">
+                  <button type="submit" class="text-red-600 hover:underline">Delete</button>
+                </form>
+              <?php else: ?>
+                <span class="text-gray-500 italic">You</span>
+              <?php endif; ?>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
   </div>
+  <?php endif; ?>
+</section>
+</div>
 </main>
+
+<script>
+  document.getElementById('searchAdmin')?.addEventListener('input', function () {
+    const value = this.value.toLowerCase();
+    document.querySelectorAll("#adminList tr").forEach(row => {
+      const rowText = row.innerText.toLowerCase();
+      row.style.display = rowText.includes(value) ? "" : "none";
+    });
+  });
+</script>
 <script src="/ilab/js/admindashboard.js"></script>
 </body>
 </html>

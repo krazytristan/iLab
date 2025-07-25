@@ -1,6 +1,6 @@
 <?php
 session_start();
-if (!isset($_SESSION['admin'])) { http_response_code(403); exit('Not authorized'); }
+if (!isset($_SESSION['admin_username'])) { http_response_code(403); exit('Not authorized'); }
 require_once '../includes/db.php';
 
 $type = $_GET['type'] ?? '';

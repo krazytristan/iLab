@@ -13,7 +13,7 @@
 </head>
 <body class="h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-white to-gray-200 font-sans relative overflow-hidden">
 
-  <!-- Session Messages -->
+  <!-- Session Message Alerts -->
   <?php if (isset($_SESSION['forgot_error'])): ?>
     <div id="errorBox" class="fixed top-5 right-5 z-50 bg-red-100 border border-red-300 text-red-700 px-6 py-3 rounded-lg shadow-lg transition-opacity duration-500">
       <div class="flex items-center gap-2">
@@ -60,10 +60,10 @@
     </p>
   </div>
 
-  <!-- Animated Background -->
+  <!-- Background Overlay -->
   <div class="absolute top-0 left-0 w-full h-full bg-gradient-to-tr from-blue-200 to-transparent animate-pulse opacity-10 z-0 pointer-events-none"></div>
 
-  <!-- JS Enhancements -->
+  <!-- Fade Out Messages -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const errorBox = document.getElementById('errorBox');
@@ -74,7 +74,7 @@
           setTimeout(() => {
             box.classList.add('opacity-0');
             setTimeout(() => box.remove(), 500);
-          }, 3000);
+          }, 3000); // fades out after 3 seconds
         }
       });
     });
