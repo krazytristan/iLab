@@ -1,6 +1,6 @@
 <?php
 session_start();
-require_once '../adminpage/db.php'; // Adjust path if needed
+require_once '../includes/db.php'; // Adjust path if needed
 
 $success = '';
 $error = '';
