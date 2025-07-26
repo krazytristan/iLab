@@ -6,7 +6,6 @@ if (!isset($_SESSION['admin_username'])) {
     header("Location: ../adminpage/adminlogin.php");
     exit();
 }
-
 // Get session values
 $admin_username = $_SESSION['admin_username'];
 $admin_role = $_SESSION['admin_role'] ?? 'admin';
@@ -73,62 +72,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'],
     $action = $_POST['reservation_action'];
     $reason = $_POST['reason'] ?? null;
 
-    $stmt = $conn->prepare("
-        SELECT pc_id, student_id, reservation_date, time_start, time_end, status
-        FROM pc_reservations WHERE id = ?
-    ");
+    $stmt = $conn->prepare("SELECT pc_id AS pc_number, student_id, reservation_date, time_start, time_end, status FROM pc_reservations WHERE id = ?");
     $stmt->bind_param("i", $res_id);
     $stmt->execute();
     $res = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if ($res) {
-        $pc_id = (int)$res['pc_id'];
+        $pc_number = (int)$res['pc_number'];
         $student_id = (int)$res['student_id'];
         $msg = "";
 
         if ($action === 'approve') {
             $conn->query("UPDATE pc_reservations SET status = 'approved', reason = NULL, updated_at = NOW() WHERE id = $res_id");
-
-            $ok = admin_auto_start_session($conn, $student_id, $pc_id, $res_id);
-            $msg = $ok
-                ? "✅ Your PC reservation (PC #$pc_id) was approved and your session has started automatically."
-                : "✅ Your PC reservation (PC #$pc_id) was approved, but session auto-start failed.";
-        }
-        elseif ($action === 'reject') {
+            $ok = admin_auto_start_session($conn, $student_id, $pc_number, $res_id);
+            $msg = $ok ? "✅ Your PC reservation (PC #$pc_number) was approved and your session has started automatically." : "✅ Your PC reservation (PC #$pc_number) was approved, but session auto-start failed.";
+        } elseif ($action === 'reject') {
             $stmt2 = $conn->prepare("UPDATE pc_reservations SET status = 'rejected', reason = ?, updated_at = NOW() WHERE id = ?");
             $stmt2->bind_param("si", $reason, $res_id);
             $stmt2->execute();
             $stmt2->close();
-            $msg = "❌ Your PC reservation (PC #$pc_id) was rejected." . ($reason ? " Reason: $reason" : "");
-        }
-        elseif ($action === 'cancel') {
-            $conn->query("
-                UPDATE lab_sessions 
-                SET status='inactive', logout_time=NOW()
-                WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_id AND status='active'
-            ");
-            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_id");
-
+            $msg = "❌ Your PC reservation (PC #$pc_number) was rejected." . ($reason ? " Reason: $reason" : "");
+        } elseif ($action === 'cancel') {
+            $conn->query("UPDATE lab_sessions SET status='inactive', logout_time=NOW() WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_number AND status='active'");
+            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_number");
             $stmt2 = $conn->prepare("UPDATE pc_reservations SET status = 'cancelled', reason = ?, updated_at = NOW() WHERE id = ?");
             $stmt2->bind_param("si", $reason, $res_id);
             $stmt2->execute();
             $stmt2->close();
-            $msg = "❌ Your PC reservation (PC #$pc_id) was cancelled." . ($reason ? " Reason: $reason" : "");
-        }
-        elseif ($action === 'completed') {
-            $conn->query("
-                UPDATE lab_sessions 
-                SET status='inactive', logout_time=NOW()
-                WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_id AND status='active'
-            ");
-            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_id");
-
+            $msg = "❌ Your PC reservation (PC #$pc_number) was cancelled." . ($reason ? " Reason: $reason" : "");
+        } elseif ($action === 'completed') {
+            $conn->query("UPDATE lab_sessions SET status='inactive', logout_time=NOW() WHERE user_type='student' AND user_id=$student_id AND pc_id=$pc_number AND status='active'");
+            $conn->query("UPDATE pcs SET status='available' WHERE id=$pc_number");
             $conn->query("UPDATE pc_reservations SET status = 'completed', updated_at = NOW() WHERE id = $res_id");
-            $msg = "✅ Your PC reservation (PC #$pc_id) was marked as completed.";
+            $msg = "✅ Your PC reservation (PC #$pc_number) was marked as completed.";
         }
 
-        // Notify the student
         if ($msg) {
             $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'student', ?)");
             $notif_stmt->bind_param("is", $student_id, $msg);
@@ -136,7 +115,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reservation_action'],
             $notif_stmt->close();
         }
     }
-
     header("Location: admindashboard.php#reservations");
     exit();
 }
@@ -290,6 +268,41 @@ $problematicPCs = $conn->query("
     ORDER BY issue_count DESC
     LIMIT 5
 ");
+
+// Notification logic
+$newNotiCount = $conn->query("SELECT COUNT(*) as unread FROM notifications WHERE recipient_type = 'admin' AND read_at IS NULL")->fetch_assoc()['unread'] ?? 0;
+$notifications = $conn->query("SELECT id, message, created_at, read_at FROM notifications WHERE recipient_type = 'admin' ORDER BY created_at DESC");
+
+// Reservation Notification for Admin with Student Name
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['res_id'], $_POST['reservation_action'])) {
+    $res_id = intval($_POST['res_id']);
+    $action = $_POST['reservation_action'];
+
+    $stmt = $conn->prepare("SELECT pc_id AS pc_number, student_id FROM pc_reservations WHERE id = ?");
+    $stmt->bind_param("i", $res_id);
+    $stmt->execute();
+    $res = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($res) {
+        $pc_number = $res['pc_number'];
+        $student_id = $res['student_id'];
+
+        $student_stmt = $conn->prepare("SELECT fullname FROM students WHERE id = ?");
+        $student_stmt->bind_param("i", $student_id);
+        $student_stmt->execute();
+        $student_stmt->bind_result($student_name);
+        $student_stmt->fetch();
+        $student_stmt->close();
+
+        $msg = "✅ Reservation update: Student <strong>$student_name</strong> - PC #$pc_number marked as <strong>$action</strong>.";
+
+        $notif_stmt = $conn->prepare("INSERT INTO notifications (recipient_id, recipient_type, message) VALUES (?, 'admin', ?)");
+        $notif_stmt->bind_param("is", $admin_id, $msg);
+        $notif_stmt->execute();
+        $notif_stmt->close();
+    }
+}
 ?>
 
 
@@ -332,27 +345,31 @@ $problematicPCs = $conn->query("
     </div>
     <div class="flex gap-4 items-center relative">
       <div class="relative">
-        <button id="notifToggle" class="relative text-xl">
-          <i class="fas fa-bell"></i>
-          <?php if ($newNotiCount > 0): ?>
-            <span class="absolute -top-1 -right-2 text-xs bg-red-600 text-white rounded-full px-1"><?= $newNotiCount ?></span>
+    <button id="notifToggle" class="relative text-xl">
+        <i class="fas fa-bell"></i>
+        <?php if ($newNotiCount > 0): ?>
+          <span class="absolute -top-1 -right-2 text-xs bg-red-600 text-white rounded-full px-1">
+            <?= $newNotiCount ?>
+          </span>
+        <?php endif; ?>
+      </button>
+      <div id="notifDropdown" class="notification-dropdown hidden absolute mt-2 right-0 bg-white dark:bg-gray-800 text-sm rounded shadow-lg w-80 z-50">
+        <ul class="divide-y divide-gray-300 dark:divide-gray-600 max-h-96 overflow-y-auto">
+          <?php if ($notifications->num_rows > 0): ?>
+            <?php while($n = $notifications->fetch_assoc()): ?>
+              <li class="p-3 hover:bg-gray-100 dark:hover:bg-gray-700">
+                <p><?= htmlspecialchars($n['message']) ?></p>
+                <small class="text-gray-500 dark:text-gray-400 block">
+                  <?= date('M d, Y h:i A', strtotime($n['created_at'])) ?>
+                </small>
+              </li>
+            <?php endwhile; ?>
+          <?php else: ?>
+            <li class="p-3">No notifications</li>
           <?php endif; ?>
-        </button>
-        <div id="notifDropdown" class="notification-dropdown hidden absolute mt-2 right-0 bg-white dark:bg-gray-800 text-sm rounded shadow-lg">
-          <ul class="divide-y divide-gray-300 dark:divide-gray-600">
-            <?php if ($notifications->num_rows > 0): ?>
-              <?php while($n = $notifications->fetch_assoc()): ?>
-                <li class="p-3 hover:bg-gray-100 dark:hover:bg-gray-700">
-                  <p><strong><?= htmlspecialchars($n['fullname']) ?></strong>: <?= htmlspecialchars($n['message']) ?></p>
-                  <small class="text-gray-500 dark:text-gray-400 block"><?= date('M d, Y h:i A', strtotime($n['created_at'])) ?></small>
-                </li>
-              <?php endwhile; ?>
-            <?php else: ?>
-              <li class="p-3">No notifications</li>
-            <?php endif; ?>
-          </ul>
-        </div>
+        </ul>
       </div>
+    </div>
       <button id="toggleSidebar" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded lg:hidden">
         <i class="fas fa-bars"></i>
       </button>

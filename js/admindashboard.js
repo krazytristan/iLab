@@ -184,3 +184,37 @@ if (logSearch) {
     });
   });
 }
+ const notifToggle = document.getElementById("notifToggle");
+    const notifDropdown = document.getElementById("notifDropdown");
+
+    notifToggle.addEventListener("click", () => {
+      notifDropdown.classList.toggle("hidden");
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!notifToggle.contains(e.target) && !notifDropdown.contains(e.target)) {
+        notifDropdown.classList.add("hidden");
+      }
+    });
+
+  function handleNotificationClick(id, message) {
+    // Mark notification as read
+    fetch('../adminpage/mark_notification_read.php', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'id=' + encodeURIComponent(id)
+    }).then(() => {
+      // Determine where to redirect
+      let lowerMsg = message.toLowerCase();
+      if (lowerMsg.includes('reservation')) {
+        window.location.href = '#reservations';
+      } else if (lowerMsg.includes('maintenance')) {
+        window.location.href = '#maintenance';
+      } else if (lowerMsg.includes('report')) {
+        window.location.href = '#reports';
+      } else {
+        window.location.href = '#dashboard';
+      }
+    });
+  }
+

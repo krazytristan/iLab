@@ -15,6 +15,7 @@ $student_id = (int)$_SESSION['student_id'];
 function format_duration($mins): string {
   if ($mins === null) return '-';
   $mins = (int)$mins;
+  if ($mins < 0) $mins = 0; // guard
   $h = intdiv($mins, 60);
   $m = $mins % 60;
   if ($h > 0) return "{$h}h {$m}m";
@@ -30,10 +31,10 @@ function start_lab_session(mysqli $conn, int $student_id, int $reservation_id, i
     try {
         // 1) Insert active session
         $stmt = $conn->prepare("
-            INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time)
-            VALUES ('student', ?, ?, 'active', NOW())
+            INSERT INTO lab_sessions (user_type, user_id, pc_id, status, login_time, reservation_id)
+            VALUES ('student', ?, ?, 'active', NOW(), ?)
         ");
-        $stmt->bind_param("ii", $student_id, $pc_id);
+        $stmt->bind_param("iii", $student_id, $pc_id, $reservation_id);
         $stmt->execute();
         $stmt->close();
 
@@ -140,7 +141,7 @@ if (isset($_POST['time_out'])) {
 }
 
 /* =========================================================
- * 3) Assistance Request (save also student_id)
+ * 3) Assistance Request
  * ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) {
   $desc   = trim($_POST['help_description']);
@@ -160,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) 
   $request_stmt->execute();
 
   // Notify admin
-  $admin_id = 1; // adjust if you support multiple admins
+  $admin_id = 1; // You can update if multiple admins exist
   $admin_message = "🛠️ Assistance request from Student #$student_id on PC #$pc_id.";
   $admin_notif = $conn->prepare("
       INSERT INTO notifications (recipient_id, recipient_type, message) 
@@ -175,9 +176,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['help_description'])) 
 }
 
 /* =========================================================
- * 4) Reservation Request
+ * 4) Reservation Request (legacy/fallback – AJAX will hit reserve_handler.php)
  * ========================================================= */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reserve_pc_id']) && !isset($_POST['is_ajax'])) {
   $reserve_pc_id    = (int)($_POST['reserve_pc_id'] ?? 0);
   $reservation_date = $_POST['reservation_date'] ?? null;
   $time_start       = $_POST['reservation_time_start'] ?? null;
@@ -280,10 +281,19 @@ while ($row = $pcsResult->fetch_assoc()) {
 }
 $grouped_pcs = [];
 foreach ($pcsData as $pc) {
+    // derive number from the tailing digits of pc_name or fallback to id
+    $pc_number = null;
+    if (preg_match('/(\d+)\s*$/', $pc['pc_name'], $m)) {
+        $pc_number = (int)$m[1];
+    } else {
+        $pc_number = (int)$pc['id'];
+    }
+
     $grouped_pcs[$pc['lab_name']][] = [
-        'id' => $pc['id'],
-        'pc_name' => $pc['pc_name'],
-        'status' => $pc['status']
+        'id'        => (int)$pc['id'],
+        'pc_name'   => $pc['pc_name'],
+        'pc_number' => $pc_number,
+        'status'    => $pc['status']
     ];
 }
 
@@ -316,7 +326,11 @@ $sessionResult = $active_stmt->get_result()->fetch_assoc();
 $session_status = $sessionResult ? 'Active' : 'Not in Session';
 $assigned_pc = ($sessionResult && isset($sessionResult['pc_id'])) ? 'PC #' . $sessionResult['pc_id'] : '-';
 $login_ts = $sessionResult['login_time'] ?? null;
-$session_time = $login_ts ? round((time() - strtotime($login_ts)) / 60) : null;
+$session_time = null;
+if ($login_ts) {
+  $diffSecs = time() - strtotime($login_ts);
+  $session_time = $diffSecs > 0 ? round($diffSecs / 60) : 0;
+}
 
 /* =========================================================
  * 7) Approved reservation “ready” right now
@@ -380,9 +394,14 @@ $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $student_id);
 $stmt->execute();
 $result = $stmt->get_result();
+
 $notifications = [];
 while ($row = $result->fetch_assoc()) {
   $notifications[] = $row;
+}
+$unread_count = 0;
+foreach ($notifications as $n) {
+  if (empty($n['is_read'])) $unread_count++;
 }
 
 /* =========================================================
@@ -436,7 +455,6 @@ $my_reservations = $my_res->get_result();
 /* For in-page countdown if you want: find active/reserved reservation */
 $active_reservation_remaining_secs = null;
 if ($session_status === 'Active' && $login_ts) {
-  // find any reservation for today that is reserved/approved and ends in the future to show countdown
   $find_end = $conn->prepare("
     SELECT TIMESTAMPDIFF(SECOND, NOW(), CONCAT(reservation_date, ' ', time_end)) AS remaining
     FROM pc_reservations
@@ -463,9 +481,13 @@ if ($session_status === 'Active' && $login_ts) {
   <title>Student Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-  <link rel="stylesheet" href="/css/studentdashboard.css">
+  <link rel="stylesheet" href="/ilab/css/studentdashboard.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body class="bg-gray-100 font-sans min-h-screen flex">
+
+<!-- Overlay for mobile sidebar -->
+<div id="sidebarOverlay" class="fixed inset-0 bg-black/40 z-30 hidden md:hidden"></div>
 
 <!-- SIDEBAR -->
 <aside id="sidebar" class="w-64 bg-blue-900 text-white p-5 space-y-2 min-h-screen fixed md:static top-0 left-0 z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-300 overflow-y-auto hide-scrollbar">
@@ -511,36 +533,49 @@ if ($session_status === 'Active' && $login_ts) {
       <h1 class="text-2xl font-bold">Welcome, <?= htmlspecialchars($student['fullname']) ?></h1>
     </div>
 
-    <!-- Clock and Notification -->
-    <div class="flex items-center gap-4 relative">
+    <!-- Clock & Notifications -->
+    <div class="flex items-center gap-4">
       <div id="clock" class="text-lg font-mono text-gray-800"></div>
-      <button id="notif-btn" class="relative text-gray-600 hover:text-blue-700">
-        <i class="fas fa-bell text-xl"></i>
-        <?php if (!empty($notifications)): ?>
-          <span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full animate-ping"></span>
-          <span class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full"></span>
-        <?php endif; ?>
-      </button>
-    </div>
-  </div>
 
-  <!-- Notifications Dropdown -->
-  <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-72 bg-white border rounded shadow-md z-50">
-    <div class="p-3 font-semibold text-sm text-gray-700 border-b">Notifications</div>
-    <ul class="max-h-64 overflow-y-auto text-sm">
-      <?php if (!empty($notifications)): ?>
-        <?php foreach ($notifications as $notif): ?>
-          <li class="p-3 border-b hover:bg-gray-100">
-            <?= htmlspecialchars($notif['message']) ?><br>
-            <small class="text-gray-500">
-              <?= date('M d, h:i A', strtotime($notif['created_at'])) ?>
-            </small>
-          </li>
-        <?php endforeach; ?>
-      <?php else: ?>
-        <li class="p-3 text-gray-500">No notifications</li>
-      <?php endif; ?>
-    </ul>
+      <div class="relative">
+        <!-- Bell -->
+        <button id="notif-btn" class="relative text-gray-600 hover:text-blue-700 focus:outline-none">
+          <i class="fas fa-bell text-xl"></i>
+          <?php if ($unread_count > 0): ?>
+            <span id="notif-dot-outer" class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full animate-ping"></span>
+            <span id="notif-dot-inner" class="absolute top-0 right-0 w-2 h-2 bg-red-600 rounded-full"></span>
+          <?php endif; ?>
+        </button>
+
+        <!-- Notification sound (optional) -->
+        <audio id="notifSound" src="/iLab/assets/notif.mp3" preload="auto"></audio>
+
+        <!-- Dropdown -->
+        <div id="notif-dropdown" class="hidden absolute right-0 top-10 w-80 bg-white border rounded shadow-md z-50">
+          <div class="flex items-center justify-between p-3 border-b">
+            <span class="font-semibold text-sm text-gray-700">Notifications</span>
+            <button id="mark-all-read" class="text-xs text-blue-600 hover:underline <?= $unread_count ? '' : 'hidden' ?>">
+              Mark all as read
+            </button>
+          </div>
+          <ul id="notif-list" class="max-h-64 overflow-y-auto text-sm">
+            <?php if (!empty($notifications)): ?>
+              <?php foreach ($notifications as $notif): ?>
+                <li class="p-3 border-b hover:bg-gray-100 cursor-pointer <?= $notif['is_read'] ? 'text-gray-400' : 'font-semibold' ?>"
+                    data-id="<?= $notif['id'] ?>">
+                  <?= htmlspecialchars($notif['message']) ?><br>
+                  <small class="<?= $notif['is_read'] ? 'text-gray-400' : 'text-gray-500' ?>">
+                    <?= date('M d, h:i A', strtotime($notif['created_at'])) ?>
+                  </small>
+                </li>
+              <?php endforeach; ?>
+            <?php else: ?>
+              <li class="p-3 text-gray-500">No notifications</li>
+            <?php endif; ?>
+          </ul>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- DASHBOARD -->
@@ -599,9 +634,7 @@ if ($session_status === 'Active' && $login_ts) {
   <!-- PC STATUS -->
   <section id="pcstatus" class="section hidden">
     <h2 class="text-2xl font-semibold mb-6 text-gray-800">PC Status by Laboratory</h2>
-    <div id="pc-status-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <!-- JS will populate this -->
-    </div>
+    <div id="pc-status-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     <div class="flex mt-4">
       <button id="refresh-pc-status" class="ml-auto px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">
         <i class="fas fa-sync-alt"></i> Refresh Status
@@ -609,73 +642,73 @@ if ($session_status === 'Active' && $login_ts) {
     </div>
   </section>
 
-  <!-- Modal -->
+  <!-- Modal for PC list -->
   <div id="pcModal" class="fixed inset-0 hidden bg-black bg-opacity-50 z-50 flex items-center justify-center">
     <div class="bg-white w-full max-w-3xl rounded-lg shadow-lg overflow-y-auto max-h-[80vh]">
       <div class="flex justify-between items-center p-4 border-b">
         <h3 id="modalLabName" class="text-xl font-bold text-blue-800">Lab Name</h3>
         <button id="closeModal" class="text-gray-500 hover:text-red-600 text-2xl font-bold">&times;</button>
       </div>
-      <div id="modalPcList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 p-4">
-        <!-- PCs will be injected here -->
-      </div>
+      <div id="modalPcList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 p-4"></div>
     </div>
   </div>
 
   <!-- RESERVE PC -->
   <section id="reserve" class="section hidden">
-    <div class="bg-white shadow rounded-lg p-6">
-      <h2 class="text-2xl font-bold mb-4 text-blue-800">Reserve a PC</h2>
+    <div class="bg-white shadow rounded-xl p-6 dark:bg-gray-800 dark:text-white">
+      <h2 class="text-2xl font-bold mb-6 text-blue-800 dark:text-blue-300 flex items-center gap-2">
+        <i class="fas fa-desktop"></i> Reserve a PC
+      </h2>
 
-      <!-- Reservation Form -->
-      <form method="POST" class="space-y-6">
+      <form method="POST" action="/iLab/studentpage/reserve_handler.php" class="space-y-6" id="reserveForm">
         <!-- Lab Selection -->
         <div>
-          <label for="lab-select" class="block mb-1 font-medium text-gray-700">Select Laboratory</label>
-          <select id="lab-select" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none transition" required>
+          <label for="lab-select" class="block mb-1 font-medium text-gray-700 dark:text-gray-300">Select Laboratory</label>
+          <select id="lab-select"
+                  class="w-full px-4 py-2 border rounded-lg focus:ring-blue-500 focus:outline-none transition dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  required>
             <option value="">-- Choose Lab --</option>
             <?php foreach ($grouped_pcs as $lab => $pcs): ?>
-              <option value="<?= htmlspecialchars($lab) ?>">
-                <?= htmlspecialchars($lab) ?> (<?= count($pcs) ?> <?= count($pcs) === 1 ? 'PC' : 'PCs' ?>)
-              </option>
+              <option value="<?= htmlspecialchars($lab) ?>"><?= htmlspecialchars($lab) ?> (<?= count($pcs) ?> PCs)</option>
             <?php endforeach; ?>
           </select>
         </div>
 
-        <!-- PC Boxes -->
-        <div id="pc-boxes" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 hidden">
-          <!-- JS renders PCs here -->
+        <!-- PC Selection -->
+        <div id="pc-boxes"
+             class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 hidden max-h-64 overflow-y-auto pr-2 border border-gray-300 rounded-lg p-3 bg-gray-50 shadow-inner dark:bg-gray-700 dark:border-gray-600">
+          <!-- Dynamic buttons -->
         </div>
 
-        <!-- Date & Time Selection -->
+        <!-- Date & Time -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <div>
-            <label for="reservation_date" class="block mb-1 font-medium text-gray-700">Reservation Date</label>
+            <label for="reservation_date" class="block mb-1 font-medium text-gray-700 dark:text-gray-300">Date</label>
             <input type="date" name="reservation_date" id="reservation_date"
-                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-400 focus:outline-none"
-                  required min="<?= date('Y-m-d') ?>" disabled>
-            <small id="date-warning" class="text-sm text-red-600 hidden"></small>
+                   class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                   required min="<?= date('Y-m-d') ?>" disabled>
           </div>
           <div>
-            <label for="reservation_time_start" class="block mb-1 font-medium text-gray-700">Start Time</label>
+          <label for="reservation_time_start" class="block mb-1 font-medium text-gray-700 dark:text-gray-300">Start Time</label>
             <input type="time" name="reservation_time_start" id="reservation_time_start"
-                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-400 focus:outline-none"
-                  required disabled>
+                   class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                   required disabled>
           </div>
           <div>
-            <label for="reservation_time_end" class="block mb-1 font-medium text-gray-700">End Time</label>
+            <label for="reservation_time_end" class="block mb-1 font-medium text-gray-700 dark:text-gray-300">End Time</label>
             <input type="time" name="reservation_time_end" id="reservation_time_end"
-                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-400 focus:outline-none"
-                  required disabled>
+                   class="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                   required disabled>
           </div>
         </div>
 
-        <!-- Submit -->
         <input type="hidden" name="reserve_pc_id" id="reserve_pc_id" />
+
         <div class="text-right mt-6">
           <button type="submit"
-                  class="bg-gradient-to-r from-blue-500 to-blue-700 text-white px-6 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-blue-800 transition shadow-lg">
-            <i class="fas fa-calendar-check mr-2"></i>Reserve PC
+                  class="bg-gradient-to-r from-blue-500 to-blue-700 text-white px-6 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-blue-800 transition shadow-lg disabled:opacity-50"
+                  id="submit-reserve-btn" disabled>
+            <i class="fas fa-calendar-check mr-2"></i> Reserve PC
           </button>
         </div>
       </form>
@@ -698,7 +731,7 @@ if ($session_status === 'Active' && $login_ts) {
             </thead>
             <tbody>
               <?php if ($my_reservations->num_rows > 0): ?>
-                <?php while ($res = $my_reservations->fetch_assoc()): 
+                <?php while ($res = $my_reservations->fetch_assoc()):
                   $statusColor = match (strtolower($res['status'])) {
                     'pending'   => 'bg-yellow-100 text-yellow-800',
                     'approved'  => 'bg-blue-100 text-blue-800',
@@ -707,7 +740,6 @@ if ($session_status === 'Active' && $login_ts) {
                     default     => 'bg-red-100 text-red-800'
                   };
                   $remainingCell = '-';
-                  $countdownAttr = '';
                   if (in_array($res['status'], ['approved','reserved']) && $res['reservation_date'] === date('Y-m-d')) {
                     $end_ts = strtotime($res['reservation_date'].' '.$res['time_end']);
                     $remaining_secs = $end_ts - time();
@@ -749,76 +781,74 @@ if ($session_status === 'Active' && $login_ts) {
     </div>
   </section>
 
-<!-- REQUEST ASSISTANCE -->
-<section id="request" class="section hidden">
-  <h2 class="text-2xl font-semibold mb-4 text-blue-900">Request Assistance</h2>
+  <!-- REQUEST ASSISTANCE -->
+  <section id="request" class="section hidden">
+    <h2 class="text-2xl font-semibold mb-4 text-blue-900">Request Assistance</h2>
 
-  <!-- Request form -->
-  <form method="POST" class="space-y-4 bg-white p-4 rounded shadow-sm">
-    <select name="help_pc_id" class="p-2 border rounded w-full" required>
-      <option value="">-- Choose PC --</option>
-      <?php foreach ($pcsData as $pc): ?>
-        <option value="<?= $pc['id'] ?>"><?= htmlspecialchars($pc['pc_name']) ?></option>
-      <?php endforeach; ?>
-    </select>
+    <form method="POST" class="space-y-4 bg-white p-4 rounded shadow-sm">
+      <select name="help_pc_id" class="p-2 border rounded w-full" required>
+        <option value="">-- Choose PC --</option>
+        <?php foreach ($pcsData as $pc): ?>
+          <option value="<?= $pc['id'] ?>"><?= htmlspecialchars($pc['pc_name']) ?></option>
+        <?php endforeach; ?>
+      </select>
 
-    <textarea name="help_description" class="w-full p-2 border rounded min-h-[120px]" placeholder="Describe the issue..." required></textarea>
+      <textarea name="help_description" class="w-full p-2 border rounded min-h-[120px]" placeholder="Describe the issue..." required></textarea>
 
-    <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
-      Submit Request
-    </button>
-  </form>
+      <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+        Submit Request
+      </button>
+    </form>
 
-  <!-- My assistance requests -->
-  <div class="mt-8 bg-white p-4 rounded shadow-sm">
-    <h3 class="text-lg font-semibold mb-3 text-gray-800">My Assistance Requests</h3>
+    <div class="mt-8 bg-white p-4 rounded shadow-sm">
+      <h3 class="text-lg font-semibold mb-3 text-gray-800">My Assistance Requests</h3>
 
-    <?php if ($assist_requests->num_rows > 0): ?>
-      <div class="overflow-x-auto">
-        <table class="w-full table-auto border border-gray-200 rounded text-sm">
-          <thead class="bg-gray-100 text-gray-700">
-            <tr>
-              <th class="px-3 py-2 border">PC Name</th>
-              <th class="px-3 py-2 border">Issue</th>
-              <th class="px-3 py-2 border">Status</th>
-              <th class="px-3 py-2 border">Requested At</th>
-              <th class="px-3 py-2 border">Updated At</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php while ($ar = $assist_requests->fetch_assoc()): ?>
-              <?php
-                $badge = match (strtolower($ar['status'])) {
-                  'pending'     => 'bg-yellow-100 text-yellow-800',
-                  'in_progress' => 'bg-blue-100 text-blue-800',
-                  'resolved', 
-                  'completed'   => 'bg-green-100 text-green-800',
-                  'rejected'    => 'bg-red-100 text-red-800',
-                  default       => 'bg-gray-100 text-gray-700'
-                };
-              ?>
-              <tr class="text-center">
-                <td class="border px-3 py-2"><?= htmlspecialchars($ar['pc_name']) ?></td>
-                <td class="border px-3 py-2 text-left"><?= nl2br(htmlspecialchars($ar['issue'])) ?></td>
-                <td class="border px-3 py-2">
-                  <span class="px-2 py-1 rounded <?= $badge ?>"><?= ucfirst($ar['status']) ?></span>
-                </td>
-                <td class="border px-3 py-2">
-                  <?= date('M d, Y h:i A', strtotime($ar['created_at'])) ?>
-                </td>
-                <td class="border px-3 py-2">
-                  <?= date('M d, Y h:i A', strtotime($ar['updated_at'])) ?>
-                </td>
+      <?php if ($assist_requests->num_rows > 0): ?>
+        <div class="overflow-x-auto">
+          <table class="w-full table-auto border border-gray-200 rounded text-sm">
+            <thead class="bg-gray-100 text-gray-700">
+              <tr>
+                <th class="px-3 py-2 border">PC Name</th>
+                <th class="px-3 py-2 border">Issue</th>
+                <th class="px-3 py-2 border">Status</th>
+                <th class="px-3 py-2 border">Requested At</th>
+                <th class="px-3 py-2 border">Updated At</th>
               </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
-      </div>
-    <?php else: ?>
-      <p class="text-gray-500 text-sm italic">No assistance requests submitted yet.</p>
-    <?php endif; ?>
-  </div>
-</section>
+            </thead>
+            <tbody>
+              <?php while ($ar = $assist_requests->fetch_assoc()): ?>
+                <?php
+                  $badge = match (strtolower($ar['status'])) {
+                    'pending'     => 'bg-yellow-100 text-yellow-800',
+                    'in_progress' => 'bg-blue-100 text-blue-800',
+                    'resolved', 
+                    'completed'   => 'bg-green-100 text-green-800',
+                    'rejected'    => 'bg-red-100 text-red-800',
+                    default       => 'bg-gray-100 text-gray-700'
+                  };
+                ?>
+                <tr class="text-center">
+                  <td class="border px-3 py-2"><?= htmlspecialchars($ar['pc_name']) ?></td>
+                  <td class="border px-3 py-2 text-left"><?= nl2br(htmlspecialchars($ar['issue'])) ?></td>
+                  <td class="border px-3 py-2">
+                    <span class="px-2 py-1 rounded <?= $badge ?>"><?= ucfirst($ar['status']) ?></span>
+                  </td>
+                  <td class="border px-3 py-2">
+                    <?= date('M d, Y h:i A', strtotime($ar['created_at'])) ?>
+                  </td>
+                  <td class="border px-3 py-2">
+                    <?= date('M d, Y h:i A', strtotime($ar['updated_at'])) ?>
+                  </td>
+                </tr>
+              <?php endwhile; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php else: ?>
+        <p class="text-gray-500 text-sm italic">No assistance requests submitted yet.</p>
+      <?php endif; ?>
+    </div>
+  </section>
 
   <!-- LOGS -->
   <section id="mylogs" class="section hidden">
@@ -876,7 +906,7 @@ if ($session_status === 'Active' && $login_ts) {
 </main>
 
 <?php
-// --- For advanced reservation slot checking (date+time) ---
+// Advanced reservation slot checking (date+time)
 $reservedSlots = [];
 $reservedSlotsSQL = $conn->query("
     SELECT pc_id, reservation_date, time_start, time_end, status 
@@ -912,11 +942,10 @@ while ($row = $reservedDatesSQL->fetch_assoc()) {
   window.reservedSlots      = <?= json_encode($reservedSlots) ?>;
 </script>
 
-<!-- Your main JS files -->
+<!-- Your main JS files (if you have them) -->
 <script src="/iLab/js/studentdashboard.js"></script>
 <script src="/iLab/js/pcstatus_realtime.js"></script>
 
-<!-- Scripts for sidebar toggle, notifications, nav, clock, timers, etc. -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (id) => document.getElementById(id);
@@ -924,10 +953,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const sidebar        = $('sidebar');
   const sidebarOverlay = $('sidebarOverlay');
   const toggleBtn      = $('toggleSidebar');
+
   const notifBtn       = $('notif-btn');
   const notifDropdown  = $('notif-dropdown');
+  const notifList      = $('notif-list');
+  const notifDotOuter  = $('notif-dot-outer');
+  const notifDotInner  = $('notif-dot-inner');
+  const markAllBtn     = $('mark-all-read');
+  const notifSound     = $('notifSound');
 
-  // Sidebar toggle (mobile)
+  const ENABLE_SOUND = true; // toggle sound
+  let lastKnownIds = new Set(
+    Array.from(notifList?.querySelectorAll('li[data-id]') || [])
+      .map(li => li.dataset.id)
+  );
+
+  /* ============================
+   * Sidebar toggle (mobile)
+   * ============================ */
   if (toggleBtn && sidebar) {
     toggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -946,11 +989,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Notifications dropdown
-document.addEventListener('DOMContentLoaded', () => {
-  const notifBtn = document.getElementById('notif-btn');
-  const notifDropdown = document.getElementById('notif-dropdown');
-
+  /* ============================
+   * Notifications dropdown
+   * ============================ */
   if (notifBtn && notifDropdown) {
     notifBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -962,21 +1003,157 @@ document.addEventListener('DOMContentLoaded', () => {
         notifDropdown.classList.add('hidden');
       }
     });
-  }
-});
 
-  // Clock
+    // Single mark as read
+    bindNotificationClickHandlers();
+  }
+
+  // Mark all as read
+  if (markAllBtn) {
+    markAllBtn.addEventListener('click', async () => {
+      const res = await fetch('/iLab/studentpage/mark_all_notifications_read.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }).then(r => r.json());
+
+      if (res.success) {
+        notifList.querySelectorAll('li[data-id]').forEach(li => {
+          li.classList.remove('font-semibold');
+          li.classList.add('text-gray-400');
+          const time = li.querySelector('small');
+          if (time) {
+            time.classList.remove('text-gray-500');
+            time.classList.add('text-gray-400');
+          }
+        });
+        hideUnreadDot();
+        markAllBtn.classList.add('hidden');
+      }
+    });
+  }
+
+  function bindNotificationClickHandlers() {
+    notifList?.querySelectorAll('li[data-id]')?.forEach(li => {
+      if (li.dataset.bound === '1') return; // prevent double binding
+      li.dataset.bound = '1';
+
+      li.addEventListener('click', async () => {
+        const id = li.dataset.id;
+        const res = await fetch('/iLab/studentpage/mark_notification_read.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `id=${id}`
+        }).then(r => r.json());
+
+        if (res.success) {
+          li.classList.remove('font-semibold');
+          li.classList.add('text-gray-400');
+          const time = li.querySelector('small');
+          if (time) {
+            time.classList.remove('text-gray-500');
+            time.classList.add('text-gray-400');
+          }
+
+          if (!notifList.querySelector('li.font-semibold')) {
+            hideUnreadDot();
+            markAllBtn?.classList.add('hidden');
+          }
+        }
+      });
+    });
+  }
+
+  function showUnreadDot() {
+    notifDotOuter?.classList.remove('hidden');
+    notifDotInner?.classList.remove('hidden');
+  }
+  function hideUnreadDot() {
+    notifDotOuter?.classList.add('hidden');
+    notifDotInner?.classList.add('hidden');
+  }
+
+  /* ============================
+   * Live polling for new notifications
+   * ============================ */
+  async function pollNotifications() {
+    try {
+      const res = await fetch('/iLab/studentpage/fetch_notifications.php', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      const data = await res.json();
+      if (!data || !data.notifications) return;
+
+      const { notifications, unread_count } = data;
+
+      const currentIds = new Set(notifications.map(n => String(n.id)));
+      const newOnes = notifications.filter(n => !lastKnownIds.has(String(n.id)));
+      if (newOnes.length && ENABLE_SOUND && notifSound) {
+        notifSound.currentTime = 0;
+        notifSound.play().catch(() => {});
+      }
+      lastKnownIds = currentIds;
+
+      renderNotifList(notifications);
+
+      if (unread_count > 0) {
+        showUnreadDot();
+        markAllBtn?.classList.remove('hidden');
+      } else {
+        hideUnreadDot();
+        markAllBtn?.classList.add('hidden');
+      }
+
+      bindNotificationClickHandlers();
+
+    } catch (e) {
+      console.error('Polling error:', e);
+    }
+  }
+
+  function renderNotifList(notifs) {
+    if (!notifList) return;
+
+    if (!notifs.length) {
+      notifList.innerHTML = '<li class="p-3 text-gray-500">No notifications</li>';
+      return;
+    }
+
+    notifList.innerHTML = notifs.map(n => `
+      <li class="p-3 border-b hover:bg-gray-100 cursor-pointer ${n.is_read == 1 ? 'text-gray-400' : 'font-semibold'}"
+          data-id="${n.id}">
+        ${escapeHtml(n.message)}<br>
+        <small class="${n.is_read == 1 ? 'text-gray-400' : 'text-gray-500'}">
+          ${n.display_date}
+        </small>
+      </li>
+    `).join('');
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // Poll every 30s
+  setInterval(pollNotifications, 30000);
+
+  /* ============================
+   * Clock
+   * ============================ */
   function updateClock() {
     const now = new Date();
     const el = $('clock');
-    if (el) {
-      el.textContent = now.toLocaleString();
-    }
+    if (el) el.textContent = now.toLocaleString();
   }
   updateClock();
   setInterval(updateClock, 1000);
 
-  // Nav Sections
+  /* ============================
+   * Nav sections
+   * ============================ */
   const sections = document.querySelectorAll('.section');
   document.querySelectorAll('.nav-link').forEach(link => {
     link.addEventListener('click', (e) => {
@@ -994,13 +1171,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById(hash).classList.remove('hidden');
   }
 
-  // Flash message auto-hide
+  /* ============================
+   * Flash auto-hide
+   * ============================ */
   setTimeout(() => {
     const fm = $('flash-message');
     if (fm) fm.remove();
   }, 5000);
 
-  // Live session duration (student top header)
+  /* ============================
+   * Live session duration
+   * ============================ */
   const liveDurationEl = $('liveDuration');
   const loginTsPHP = "<?= $login_ts ? strtotime($login_ts) * 1000 : '' ?>";
   if (liveDurationEl && loginTsPHP) {
@@ -1016,7 +1197,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(tick, 1000);
   }
 
-  // Live duration (My Logs)
+  // My Logs live duration
   document.querySelectorAll('.live-log-duration').forEach(el => {
     const start = parseInt(el.dataset.start, 10);
     const run = () => {
@@ -1029,7 +1210,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(run, 1000);
   });
 
-  // Format seconds as h/m
   function fmtSeconds(s) {
     if (s < 0) return "0m";
     const m = Math.floor(s / 60);
@@ -1038,7 +1218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return (h > 0 ? h + "h " : "") + mm + "m";
   }
 
-  // Countdown timers (per reservation row)
+  // Reservation countdown per row
   document.querySelectorAll('.countdown').forEach(el => {
     let remaining = parseInt(el.dataset.remaining, 10);
     const update = () => {
@@ -1058,7 +1238,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const cEl = $('countdown');
   if (cEl) {
     let remain = parseInt(cEl.dataset.remaining, 10);
-    const loop = () => {
+    const h = setInterval(() => {
       remain--;
       if (remain <= 0) {
         cEl.textContent = "Finished";
@@ -1066,9 +1246,103 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         cEl.textContent = fmtSeconds(remain);
       }
-    };
+    }, 1000);
     cEl.textContent = fmtSeconds(remain);
-    const h = setInterval(loop, 1000);
+  }
+
+  /* ============================
+   * Reserve form logic (PC grid)
+   * ============================ */
+  const groupedPcs = window.groupedPCs || {};
+  const labSelect = document.getElementById('lab-select');
+  const pcBoxes = document.getElementById('pc-boxes');
+  const reservePcIdInput = document.getElementById('reserve_pc_id');
+  const dateInput = document.getElementById('reservation_date');
+  const timeStartInput = document.getElementById('reservation_time_start');
+  const timeEndInput = document.getElementById('reservation_time_end');
+  const submitBtn = document.getElementById('submit-reserve-btn');
+
+  if (labSelect) {
+    labSelect.addEventListener('change', () => {
+      const selectedLab = labSelect.value;
+      pcBoxes.innerHTML = '';
+      reservePcIdInput.value = '';
+      submitBtn.disabled = true;
+      dateInput.disabled = true;
+      timeStartInput.disabled = true;
+      timeEndInput.disabled = true;
+
+      if (selectedLab && groupedPcs[selectedLab]) {
+        pcBoxes.classList.remove('hidden');
+        groupedPcs[selectedLab].forEach(pc => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `w-full px-3 py-2 rounded-lg text-sm font-semibold border transition ${
+            pc.status === 'available'
+              ? 'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
+              : 'bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed'
+          }`;
+          btn.textContent = `${pc.pc_name}`; // you can also show `PC #${pc.pc_number}`
+          btn.disabled = pc.status !== 'available';
+
+          if (pc.status === 'available') {
+            btn.addEventListener('click', () => {
+              reservePcIdInput.value = pc.id;
+              dateInput.disabled = false;
+              timeStartInput.disabled = false;
+              timeEndInput.disabled = false;
+              submitBtn.disabled = false;
+
+              // Highlight selected
+              document.querySelectorAll('#pc-boxes button').forEach(b => b.classList.remove('ring', 'ring-blue-500'));
+              btn.classList.add('ring', 'ring-blue-500');
+            });
+          }
+
+          pcBoxes.appendChild(btn);
+        });
+      } else {
+        pcBoxes.classList.add('hidden');
+      }
+    });
+  }
+
+  /* ============================
+   * AJAX submit reserve form
+   * ============================ */
+  const reserveForm = document.getElementById('reserveForm');
+  if (reserveForm) {
+    reserveForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const formData = new FormData(this);
+      // mark it's ajax so PHP won't re-run fallback legacy handler
+      formData.append('is_ajax', '1');
+      formData.append('student_id', '<?= $student_id ?>');
+
+      submitBtn.disabled = true;
+
+      try {
+        const response = await fetch(this.action, {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+          Swal.fire('✅ Success!', result.message, 'success');
+          setTimeout(() => location.reload(), 1500);
+        } else {
+          Swal.fire(result.status === 'conflict' ? '⚠️ Conflict' : '❌ Error', result.message, result.status === 'conflict' ? 'warning' : 'error');
+        }
+      } catch (error) {
+        console.error('Error submitting reservation:', error);
+        Swal.fire('❌ Error', 'An unexpected error occurred.', 'error');
+      }
+
+      submitBtn.disabled = false;
+    });
   }
 });
 </script>
